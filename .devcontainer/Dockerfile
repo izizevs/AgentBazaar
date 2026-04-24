@@ -32,11 +32,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
   && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # AgentBazaar: build deps for Solana/Anchor native compilation + psql client for debugging
+# libclang-dev is pulled in for bindgen inside agave's secp256k1 / zstd crates
+# when cargo-installing solana-test-validator; without it, bindgen panics
+# "Unable to find libclang" mid-compile (see docs/decisions/0001-sbf-toolchain-workarounds.md).
 RUN apt-get update && apt-get install -y --no-install-recommends \
   build-essential \
   pkg-config \
   libssl-dev \
   libudev-dev \
+  libclang-dev \
   protobuf-compiler \
   ca-certificates \
   postgresql-client \
