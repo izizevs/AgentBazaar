@@ -13,6 +13,9 @@ services:
       - ./.tmux.conf.local:/home/node/.tmux.conf.local
       - ./nvim-config:/home/node/.config/nvim
       - nvim-data:/home/node/.local/share/nvim
+      - cargo-home:/home/node/.cargo
+      - avm-home:/home/node/.avm
+      - solana-home:/home/node/.local/share/solana
     working_dir: /workspace
     stdin_open: true
     tty: true
@@ -47,3 +50,6 @@ services:
 volumes:
   nvim-data:
   postgres-data:
+  cargo-home:
+  avm-home:
+  solana-home:
