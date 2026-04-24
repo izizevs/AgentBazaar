@@ -1,0 +1,49 @@
+{
+  "$schema": "https://turbo.build/schema.json",
+  "ui": "tui",
+  "globalEnv": [
+    "NODE_ENV",
+    "SOLANA_CLUSTER",
+    "SOLANA_RPC_URL",
+    "SOLANA_WS_URL",
+    "HELIUS_API_KEY",
+    "DATABASE_URL",
+    "PINATA_JWT",
+    "PINATA_API_KEY",
+    "PINATA_API_SECRET",
+    "X402_FACILITATOR_URL",
+    "SATI_PROGRAM_ID",
+    "BAZAAR_REGISTRY_PROGRAM_ID",
+    "BAZAAR_ESCROW_PROGRAM_ID",
+    "BAZAAR_SLA_PROGRAM_ID",
+    "BAZAAR_EVALUATOR_PROGRAM_ID"
+  ],
+  "globalDependencies": [
+    ".env",
+    "tsconfig.base.json"
+  ],
+  "tasks": {
+    "build": {
+      "dependsOn": ["^build", "codegen"],
+      "outputs": ["dist/**", ".next/**", "!.next/cache/**"]
+    },
+    "test": {
+      "dependsOn": ["^build"],
+      "outputs": ["coverage/**"]
+    },
+    "typecheck": {
+      "dependsOn": ["^build"]
+    },
+    "lint": {},
+    "codegen": {
+      "cache": false
+    },
+    "dev": {
+      "cache": false,
+      "persistent": true
+    },
+    "clean": {
+      "cache": false
+    }
+  }
+}
