@@ -41,8 +41,7 @@ coverage
 /nvim-config
 /.tmux.conf.local
 
-# Generated
-packages/idl/src/generated
+# Generated — sdk/generated is codegen-only; idl/generated is git-tracked (consumers skip codegen step)
 packages/sdk/src/generated
 
 # Claude agent runtime (already persisted elsewhere via bind mount)

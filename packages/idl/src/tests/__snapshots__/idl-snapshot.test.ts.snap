@@ -1,0 +1,36 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`bazaar-registry IDL > matches snapshot — catches accidental IDL drift 1`] = `
+{
+  "accountNames": [
+    "ServiceListing",
+  ],
+  "address": "GJRgCCqkYvAezidpdd3i4p4kRRfJnM1EfGfgqYgchQqd",
+  "errorNames": [
+    "Unauthorized",
+    "InvalidCapabilityHash",
+    "MetadataUriTooLong",
+    "InvalidPricingModel",
+    "InvalidUptimePct",
+    "SlaFieldTooLong",
+    "TooManyCustomParams",
+    "AlreadyInactive",
+    "AlreadyActive",
+  ],
+  "instructionNames": [
+    "deactivate_service",
+    "reactivate_service",
+    "register_service",
+    "update_service",
+  ],
+  "name": "bazaar_registry",
+  "typeNames": [
+    "CustomParam",
+    "ServiceListing",
+    "ServiceListingCreated",
+    "ServiceListingUpdated",
+    "SlaParams",
+  ],
+  "version": "0.1.0",
+}
+`;
