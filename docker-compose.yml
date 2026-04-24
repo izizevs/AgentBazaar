@@ -1,0 +1,49 @@
+services:
+  claude:
+    build:
+      context: .devcontainer/
+      dockerfile: Dockerfile
+    image: claude-custom
+    cap_add:
+      - NET_ADMIN
+    volumes:
+      - .:/workspace
+      - ./claude-auth:/home/node/.claude
+      - ./claude-auth.json:/home/node/.claude.json
+      - ./.tmux.conf.local:/home/node/.tmux.conf.local
+      - ./nvim-config:/home/node/.config/nvim
+      - nvim-data:/home/node/.local/share/nvim
+    working_dir: /workspace
+    stdin_open: true
+    tty: true
+    environment:
+      - TERM=tmux-256color
+      - LANG=en_US.UTF-8
+      - LC_ALL=en_US.UTF-8
+      - DATABASE_URL=postgres://agentbazaar:agentbazaar@postgres:5432/agentbazaar
+    ports:
+      - "3033:3033"
+      - "5177:5177"
+    depends_on:
+      - postgres
+
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: agentbazaar
+      POSTGRES_PASSWORD: agentbazaar
+      POSTGRES_DB: agentbazaar
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U agentbazaar"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  nvim-data:
+  postgres-data:

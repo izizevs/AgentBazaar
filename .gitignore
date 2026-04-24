@@ -1,0 +1,49 @@
+# Secrets — never commit
+.env
+.env.local
+.env.*.local
+**/.dev.vars
+!**/.dev.vars.example
+
+# Dependencies
+node_modules
+.pnpm-store
+.pnpm-debug.log*
+
+# Build artifacts
+dist
+build
+.turbo
+.next
+target
+.anchor
+.cargo
+
+# Test / coverage
+coverage
+.nyc_output
+/test-ledger
+
+# Solana keys / localnet artifacts
+*.keypair.json
+**/*-keypair.json
+
+# OS / editor
+.DS_Store
+*.swp
+.idea
+.vscode/settings.json
+*.log
+
+# Host-mounted editor configs (bind-mounted from Mac for devcontainer only)
+/coc-settings.json
+/nvim-config
+/.tmux.conf.local
+
+# Generated
+packages/idl/src/generated
+packages/sdk/src/generated
+
+# Claude agent runtime (already persisted elsewhere via bind mount)
+claude-auth
+claude-auth.json
