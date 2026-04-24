@@ -73,8 +73,13 @@ ENV LANG=en_US.UTF-8
 ENV LC_ALL=en_US.UTF-8
 
 # Create workspace and config directories and set permissions
-RUN mkdir -p /workspace /home/node/.claude /home/node/.local/share/nvim && \
-  chown -R node:node /workspace /home/node/.claude /home/node/.local
+# .avm and .local/share/solana are pre-created as node:node so that first-time
+# volume mounts (avm-home, solana-home in docker-compose.yml) inherit those perms.
+# Without this, Docker creates the volume mount points as root and the node user
+# can't write to them.
+RUN mkdir -p /workspace /home/node/.claude /home/node/.local/share/nvim \
+    /home/node/.local/share/solana /home/node/.avm && \
+  chown -R node:node /workspace /home/node/.claude /home/node/.local /home/node/.avm
 
 WORKDIR /workspace
 
