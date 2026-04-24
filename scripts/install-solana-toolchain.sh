@@ -56,16 +56,38 @@ if ! avm list 2>/dev/null | grep -q "^${ANCHOR_VERSION} "; then
 fi
 avm use "${ANCHOR_VERSION}"
 
-# --- 3. solana-test-validator ---
+# --- 3. cargo-build-sbf SDK scripts (strip.sh / env.sh) ---
+# `cargo install solana-cli` deposits the binary but not the sdk/sbf/ tree that
+# cargo-build-sbf reads for post-link stripping. Symlink from the agave source
+# checkout (already on disk after step 1) to the path cargo-build-sbf expects.
+install_sbf_sdk_links() {
+  local agave_src
+  agave_src="$(ls -d "${HOME}/.cargo/git/checkouts/agave-"*/* 2>/dev/null | head -1)"
+  if [[ -z "${agave_src}" || ! -d "${agave_src}/sdk/sbf" ]]; then
+    log "warn: agave source checkout not found; skipping sdk/sbf linking"
+    return
+  fi
+  mkdir -p "${HOME}/.cargo/bin/sdk/sbf"
+  [[ -e "${HOME}/.cargo/bin/sdk/sbf/scripts" ]] || \
+    ln -s "${agave_src}/sdk/sbf/scripts" "${HOME}/.cargo/bin/sdk/sbf/scripts"
+  [[ -e "${HOME}/.cargo/bin/sdk/sbf/env.sh" ]] || \
+    ln -s "${agave_src}/sdk/sbf/env.sh" "${HOME}/.cargo/bin/sdk/sbf/env.sh"
+  log "sdk/sbf scripts linked from ${agave_src}"
+}
+install_sbf_sdk_links
+
+# --- 4. solana-test-validator ---
 # TODO: the cargo crate `solana-test-validator` is a library (no bin target). Install path
 # still to be resolved — options: docker sidecar `solanalabs/solana` image, `surfpool`, or
 # build from a different agave sub-crate. For now qa-test-eng can run test-validator via a
 # detached container when needed.
 
-# --- 4. Summary ---
+# --- 5. Summary ---
 log "Done."
 echo
 echo "solana: $(solana --version)"
 echo "anchor: $(anchor --version)"
 echo
 echo "Reminder: solana-test-validator is NOT installed yet — see TODO in this script."
+echo "Reminder: after any 'cargo update' inside programs/, re-run ./scripts/pin-sbf-toolchain-deps.sh"
+echo "          so transitive crates stay compatible with platform-tools rustc 1.79."

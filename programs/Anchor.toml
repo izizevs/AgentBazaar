@@ -5,6 +5,14 @@ anchor_version = "0.31.1"
 resolution = true
 skip-lint = false
 
+[workspace]
+members = [
+  "bazaar-registry",
+  "bazaar-escrow",
+  "bazaar-sla",
+  "bazaar-evaluator",
+]
+
 [programs.localnet]
 bazaar_registry = "GJRgCCqkYvAezidpdd3i4p4kRRfJnM1EfGfgqYgchQqd"
 bazaar_escrow = "qTezZXasYhw2mUQiJC4FSpu1FrDWqawAWdAaWzvdzSs"
