@@ -1,0 +1,22 @@
+[package]
+name = "bazaar-evaluator"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "AgentBazaar evaluator stub — full evaluator framework ships in V1."
+
+[lib]
+crate-type = ["cdylib", "lib"]
+name = "bazaar_evaluator"
+
+[features]
+default = []
+cpi = ["no-entrypoint"]
+no-entrypoint = []
+no-idl = []
+no-log-ix-name = []
+idl-build = ["anchor-lang/idl-build"]
+
+[dependencies]
+anchor-lang = { workspace = true }

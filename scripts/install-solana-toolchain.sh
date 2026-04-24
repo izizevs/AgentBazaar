@@ -15,23 +15,34 @@ AGAVE_VERSION="${AGAVE_VERSION:-v2.1.14}"
 
 log() { printf "\033[1;34m[install-solana-toolchain]\033[0m %s\n" "$*"; }
 
-# --- 1. Solana CLI (from agave source) ---
-if command -v solana >/dev/null 2>&1; then
-  log "solana already installed: $(solana --version)"
-else
-  log "Installing Solana CLI from agave ${AGAVE_VERSION} (this takes ~15 min)…"
-  # RUSTFLAGS: agave v2.1.14 code predates the `dangerous_implicit_autorefs` lint that's
-  # deny-by-default in newer Rust; also silence the lifetime-syntax warning that newer
-  # toolchains promote. Bump AGAVE_VERSION to a release with upstream fixes to drop these.
-  RUSTFLAGS="-A dangerous_implicit_autorefs -A mismatched_lifetime_syntaxes" \
-    cargo install \
-      --git https://github.com/anza-xyz/agave \
-      --tag "${AGAVE_VERSION}" \
-      solana-cli \
-      --locked
-fi
+# AGAVE_VERSION ships agave v2.1.x RUSTFLAGS workarounds for newer Rust toolchains.
+# Bump the tag to a release with upstream fixes to drop these flags.
+export RUSTFLAGS="-A dangerous_implicit_autorefs -A mismatched_lifetime_syntaxes"
+
+install_agave_bin() {
+  local bin="$1"
+  if command -v "${bin}" >/dev/null 2>&1; then
+    log "${bin} already installed: $(${bin} --version)"
+    return
+  fi
+  log "Installing ${bin} from agave ${AGAVE_VERSION} (source build)…"
+  cargo install \
+    --git https://github.com/anza-xyz/agave \
+    --tag "${AGAVE_VERSION}" \
+    "${bin}" \
+    --locked
+}
+
+# --- 1. Solana CLI + keygen (from agave source) ---
+# Anza does not publish arm64-linux release binaries; cargo install each sub-crate one by one.
+# solana-cli takes ~15 min (first build). solana-keygen is ~2 min (shares build cache).
+install_agave_bin solana-cli
+install_agave_bin solana-keygen
 
 # --- 2. Anchor via AVM ---
+# ANCHOR_VERSION pinned until end of MVP per M0 risk register — avoids IDL breakage from upgrades.
+ANCHOR_VERSION="${ANCHOR_VERSION:-0.31.1}"
+
 if command -v avm >/dev/null 2>&1; then
   log "avm already installed"
 else
@@ -39,11 +50,11 @@ else
   cargo install --git https://github.com/coral-xyz/anchor avm --locked --force
 fi
 
-if ! avm list 2>/dev/null | grep -qE '^[0-9]'; then
-  log "Installing Anchor latest via AVM…"
-  avm install latest
+if ! avm list 2>/dev/null | grep -q "^${ANCHOR_VERSION} "; then
+  log "Installing Anchor ${ANCHOR_VERSION} from source via AVM…"
+  avm install "${ANCHOR_VERSION}" --from-source
 fi
-avm use latest
+avm use "${ANCHOR_VERSION}"
 
 # --- 3. solana-test-validator ---
 # TODO: the cargo crate `solana-test-validator` is a library (no bin target). Install path
