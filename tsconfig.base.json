@@ -20,10 +20,5 @@
     "sourceMap": true,
     "incremental": true
   },
-  "exclude": [
-    "node_modules",
-    "dist",
-    ".next",
-    "target"
-  ]
+  "exclude": ["node_modules", "dist", ".next", "target"]
 }

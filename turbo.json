@@ -18,10 +18,7 @@
     "BAZAAR_SLA_PROGRAM_ID",
     "BAZAAR_EVALUATOR_PROGRAM_ID"
   ],
-  "globalDependencies": [
-    ".env",
-    "tsconfig.base.json"
-  ],
+  "globalDependencies": [".env", "tsconfig.base.json"],
   "tasks": {
     "build": {
       "dependsOn": ["^build", "codegen"],
