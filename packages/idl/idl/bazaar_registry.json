@@ -1,0 +1,463 @@
+{
+  "address": "GJRgCCqkYvAezidpdd3i4p4kRRfJnM1EfGfgqYgchQqd",
+  "metadata": {
+    "name": "bazaar_registry",
+    "version": "0.1.0",
+    "spec": "0.1.0",
+    "description": "AgentBazaar service registry — ServiceListing PDAs, discovery metadata.",
+    "repository": "https://github.com/izizevs/AgentBazaar"
+  },
+  "instructions": [
+    {
+      "name": "deactivate_service",
+      "discriminator": [251, 86, 29, 182, 216, 170, 85, 155],
+      "accounts": [
+        {
+          "name": "owner",
+          "signer": true,
+          "relations": ["listing"]
+        },
+        {
+          "name": "listing",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [108, 105, 115, 116, 105, 110, 103]
+              },
+              {
+                "kind": "account",
+                "path": "listing.owner",
+                "account": "ServiceListing"
+              },
+              {
+                "kind": "account",
+                "path": "listing.capability_hash",
+                "account": "ServiceListing"
+              }
+            ]
+          }
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "reactivate_service",
+      "discriminator": [187, 36, 42, 54, 189, 110, 48, 186],
+      "accounts": [
+        {
+          "name": "owner",
+          "signer": true,
+          "relations": ["listing"]
+        },
+        {
+          "name": "listing",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [108, 105, 115, 116, 105, 110, 103]
+              },
+              {
+                "kind": "account",
+                "path": "listing.owner",
+                "account": "ServiceListing"
+              },
+              {
+                "kind": "account",
+                "path": "listing.capability_hash",
+                "account": "ServiceListing"
+              }
+            ]
+          }
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "register_service",
+      "discriminator": [11, 133, 158, 232, 193, 19, 229, 73],
+      "accounts": [
+        {
+          "name": "owner",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "listing",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [108, 105, 115, 116, 105, 110, 103]
+              },
+              {
+                "kind": "account",
+                "path": "owner"
+              },
+              {
+                "kind": "arg",
+                "path": "capability_hash"
+              }
+            ]
+          }
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "capability_hash",
+          "type": {
+            "array": ["u8", 32]
+          }
+        },
+        {
+          "name": "sati_agent_id",
+          "type": "u64"
+        },
+        {
+          "name": "price_lamports",
+          "type": "u64"
+        },
+        {
+          "name": "pricing_model",
+          "type": "u8"
+        },
+        {
+          "name": "sla_params",
+          "type": {
+            "defined": {
+              "name": "SlaParams"
+            }
+          }
+        },
+        {
+          "name": "metadata_uri",
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "name": "update_service",
+      "discriminator": [46, 169, 26, 33, 191, 78, 40, 221],
+      "accounts": [
+        {
+          "name": "owner",
+          "signer": true,
+          "relations": ["listing"]
+        },
+        {
+          "name": "listing",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [108, 105, 115, 116, 105, 110, 103]
+              },
+              {
+                "kind": "account",
+                "path": "listing.owner",
+                "account": "ServiceListing"
+              },
+              {
+                "kind": "account",
+                "path": "listing.capability_hash",
+                "account": "ServiceListing"
+              }
+            ]
+          }
+        }
+      ],
+      "args": [
+        {
+          "name": "new_price",
+          "type": {
+            "option": "u64"
+          }
+        },
+        {
+          "name": "new_sla",
+          "type": {
+            "option": {
+              "defined": {
+                "name": "SlaParams"
+              }
+            }
+          }
+        },
+        {
+          "name": "new_uri",
+          "type": {
+            "option": "string"
+          }
+        }
+      ]
+    }
+  ],
+  "accounts": [
+    {
+      "name": "ServiceListing",
+      "discriminator": [117, 173, 54, 52, 146, 147, 124, 211]
+    }
+  ],
+  "events": [
+    {
+      "name": "ServiceListingCreated",
+      "discriminator": [214, 51, 85, 39, 92, 202, 181, 120]
+    },
+    {
+      "name": "ServiceListingUpdated",
+      "discriminator": [234, 45, 86, 218, 125, 0, 37, 210]
+    }
+  ],
+  "errors": [
+    {
+      "code": 6000,
+      "name": "Unauthorized",
+      "msg": "Only the listing owner can perform this action"
+    },
+    {
+      "code": 6001,
+      "name": "InvalidCapabilityHash",
+      "msg": "Capability hash must not be all zero"
+    },
+    {
+      "code": 6002,
+      "name": "MetadataUriTooLong",
+      "msg": "Metadata URI exceeds maximum length"
+    },
+    {
+      "code": 6003,
+      "name": "InvalidPricingModel",
+      "msg": "Pricing model must be 0..=3 (per_request/per_job/hourly/subscription)"
+    },
+    {
+      "code": 6004,
+      "name": "InvalidUptimePct",
+      "msg": "min_uptime_pct must be in basis points (0..=10000)"
+    },
+    {
+      "code": 6005,
+      "name": "SlaFieldTooLong",
+      "msg": "SLA param string exceeds maximum length"
+    },
+    {
+      "code": 6006,
+      "name": "TooManyCustomParams",
+      "msg": "Too many custom SLA params"
+    },
+    {
+      "code": 6007,
+      "name": "AlreadyInactive",
+      "msg": "Listing is already inactive"
+    },
+    {
+      "code": 6008,
+      "name": "AlreadyActive",
+      "msg": "Listing is already active"
+    }
+  ],
+  "types": [
+    {
+      "name": "CustomParam",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "key",
+            "type": "string"
+          },
+          {
+            "name": "value",
+            "type": "string"
+          }
+        ]
+      }
+    },
+    {
+      "name": "ServiceListing",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "owner",
+            "type": "pubkey"
+          },
+          {
+            "name": "sati_agent_id",
+            "type": "u64"
+          },
+          {
+            "name": "capability_hash",
+            "type": {
+              "array": ["u8", 32]
+            }
+          },
+          {
+            "name": "price_lamports",
+            "type": "u64"
+          },
+          {
+            "name": "pricing_model",
+            "type": "u8"
+          },
+          {
+            "name": "sla_params",
+            "type": {
+              "defined": {
+                "name": "SlaParams"
+              }
+            }
+          },
+          {
+            "name": "metadata_uri",
+            "type": "string"
+          },
+          {
+            "name": "is_active",
+            "type": "bool"
+          },
+          {
+            "name": "jobs_completed",
+            "type": "u32"
+          },
+          {
+            "name": "created_at",
+            "type": "i64"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "ServiceListingCreated",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "listing",
+            "type": "pubkey"
+          },
+          {
+            "name": "owner",
+            "type": "pubkey"
+          },
+          {
+            "name": "sati_agent_id",
+            "type": "u64"
+          },
+          {
+            "name": "capability_hash",
+            "type": {
+              "array": ["u8", 32]
+            }
+          },
+          {
+            "name": "price_lamports",
+            "type": "u64"
+          },
+          {
+            "name": "pricing_model",
+            "type": "u8"
+          },
+          {
+            "name": "metadata_uri",
+            "type": "string"
+          },
+          {
+            "name": "created_at",
+            "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "ServiceListingUpdated",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "listing",
+            "type": "pubkey"
+          },
+          {
+            "name": "owner",
+            "type": "pubkey"
+          },
+          {
+            "name": "new_price",
+            "type": {
+              "option": "u64"
+            }
+          },
+          {
+            "name": "new_uri",
+            "type": {
+              "option": "string"
+            }
+          },
+          {
+            "name": "is_active",
+            "type": "bool"
+          },
+          {
+            "name": "updated_at",
+            "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "SlaParams",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "max_latency_ms",
+            "type": {
+              "option": "u32"
+            }
+          },
+          {
+            "name": "min_uptime_pct",
+            "type": {
+              "option": "u16"
+            }
+          },
+          {
+            "name": "response_format",
+            "type": {
+              "option": "string"
+            }
+          },
+          {
+            "name": "json_schema_uri",
+            "type": {
+              "option": "string"
+            }
+          },
+          {
+            "name": "custom_params",
+            "type": {
+              "vec": {
+                "defined": {
+                  "name": "CustomParam"
+                }
+              }
+            }
+          }
+        ]
+      }
+    }
+  ]
+}
