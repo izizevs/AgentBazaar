@@ -16,7 +16,10 @@
       "!**/*.generated.*",
       "!**/.turbo",
       "!**/coverage",
-      "!**/.worktrees"
+      "!**/.worktrees",
+      "!packages/idl/src/generated",
+      "!packages/idl/idl",
+      "!apps/indexer/drizzle"
     ]
   },
   "formatter": {
