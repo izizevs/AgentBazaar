@@ -27,7 +27,6 @@ const EXPECTED_INDEXES = [
 const dbUrl = process.env.DATABASE_URL;
 
 describe.skipIf(!dbUrl)('service_listings migration', () => {
-  // biome-ignore lint/style/noNonNullAssertion: guarded by skipIf above
   const pg = postgres(dbUrl!);
   const db = drizzle(pg);
 

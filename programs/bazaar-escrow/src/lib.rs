@@ -3,7 +3,7 @@ use anchor_spl::token::{self, Token, TokenAccount, Transfer};
 use bazaar_registry::program::BazaarRegistry;
 use bazaar_registry::ServiceListing;
 
-declare_id!("qTezZXasYhw2mUQiJC4FSpu1FrDWqawAWdAaWzvdzSs");
+declare_id!("EhFptDs4mz6rt7HDmt8pB7ZogiqxUMVhpjB3NvToXxW2");
 
 pub const MAX_RESULT_URI: usize = 128;
 pub const MAX_REASON: usize = 128;

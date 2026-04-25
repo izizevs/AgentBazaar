@@ -6,7 +6,7 @@ import { defineConfig } from 'drizzle-kit';
 
 dotenvLoad();
 
-const dbUrl = process.env['DATABASE_URL'];
+const dbUrl = process.env.DATABASE_URL;
 if (!dbUrl) throw new Error('DATABASE_URL is required for drizzle-kit');
 
 export default defineConfig({

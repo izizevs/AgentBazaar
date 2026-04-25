@@ -1,7 +1,7 @@
 use anchor_lang::prelude::*;
 use anchor_lang::solana_program::pubkey;
 
-declare_id!("GJRgCCqkYvAezidpdd3i4p4kRRfJnM1EfGfgqYgchQqd");
+declare_id!("ADWoSmfUWLLRGMWZ61xuAMPhDgG77ziqAC5MA9voqLn3");
 
 pub const MAX_METADATA_URI: usize = 64;
 pub const MAX_RESPONSE_FORMAT: usize = 16;
@@ -16,7 +16,7 @@ pub const UPTIME_PCT_MAX_BPS: u16 = 10_000;
 // C1 fix: bazaar-escrow program ID stored as a constant so we can verify
 // that increment_jobs_completed is only callable via bazaar-escrow CPI.
 // Must stay in sync with declare_id! in programs/bazaar-escrow/src/lib.rs.
-pub const BAZAAR_ESCROW_ID: Pubkey = pubkey!("qTezZXasYhw2mUQiJC4FSpu1FrDWqawAWdAaWzvdzSs");
+pub const BAZAAR_ESCROW_ID: Pubkey = pubkey!("EhFptDs4mz6rt7HDmt8pB7ZogiqxUMVhpjB3NvToXxW2");
 
 #[program]
 pub mod bazaar_registry {

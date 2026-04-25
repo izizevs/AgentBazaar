@@ -1,5 +1,5 @@
 {
-  "address": "GJRgCCqkYvAezidpdd3i4p4kRRfJnM1EfGfgqYgchQqd",
+  "address": "ADWoSmfUWLLRGMWZ61xuAMPhDgG77ziqAC5MA9voqLn3",
   "metadata": {
     "name": "bazaar_registry",
     "version": "0.1.0",
@@ -10,12 +10,23 @@
   "instructions": [
     {
       "name": "deactivate_service",
-      "discriminator": [251, 86, 29, 182, 216, 170, 85, 155],
+      "discriminator": [
+        251,
+        86,
+        29,
+        182,
+        216,
+        170,
+        85,
+        155
+      ],
       "accounts": [
         {
           "name": "owner",
           "signer": true,
-          "relations": ["listing"]
+          "relations": [
+            "listing"
+          ]
         },
         {
           "name": "listing",
@@ -24,7 +35,15 @@
             "seeds": [
               {
                 "kind": "const",
-                "value": [108, 105, 115, 116, 105, 110, 103]
+                "value": [
+                  108,
+                  105,
+                  115,
+                  116,
+                  105,
+                  110,
+                  103
+                ]
               },
               {
                 "kind": "account",
@@ -43,13 +62,112 @@
       "args": []
     },
     {
+      "name": "increment_jobs_completed",
+      "docs": [
+        "CPI-only: called by bazaar-escrow on confirm_delivery.",
+        "The escrow_authority PDA (seeds=[b\"authority\"], program=bazaar-escrow)",
+        "must sign — enforced by the Signer + seeds::program constraint below."
+      ],
+      "discriminator": [
+        58,
+        56,
+        73,
+        152,
+        185,
+        168,
+        135,
+        163
+      ],
+      "accounts": [
+        {
+          "name": "listing",
+          "writable": true
+        },
+        {
+          "name": "escrow_authority",
+          "docs": [
+            "C1 fix: PDA derived from [b\"authority\"] in bazaar-escrow program.",
+            "Only bazaar-escrow can produce a valid signer here via CPI invoke_signed."
+          ],
+          "signer": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  97,
+                  117,
+                  116,
+                  104,
+                  111,
+                  114,
+                  105,
+                  116,
+                  121
+                ]
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                203,
+                119,
+                236,
+                252,
+                205,
+                150,
+                208,
+                237,
+                108,
+                31,
+                90,
+                160,
+                202,
+                133,
+                96,
+                54,
+                36,
+                63,
+                66,
+                249,
+                62,
+                84,
+                105,
+                214,
+                90,
+                130,
+                198,
+                58,
+                1,
+                173,
+                98,
+                223
+              ]
+            }
+          }
+        }
+      ],
+      "args": []
+    },
+    {
       "name": "reactivate_service",
-      "discriminator": [187, 36, 42, 54, 189, 110, 48, 186],
+      "discriminator": [
+        187,
+        36,
+        42,
+        54,
+        189,
+        110,
+        48,
+        186
+      ],
       "accounts": [
         {
           "name": "owner",
           "signer": true,
-          "relations": ["listing"]
+          "relations": [
+            "listing"
+          ]
         },
         {
           "name": "listing",
@@ -58,7 +176,15 @@
             "seeds": [
               {
                 "kind": "const",
-                "value": [108, 105, 115, 116, 105, 110, 103]
+                "value": [
+                  108,
+                  105,
+                  115,
+                  116,
+                  105,
+                  110,
+                  103
+                ]
               },
               {
                 "kind": "account",
@@ -78,7 +204,16 @@
     },
     {
       "name": "register_service",
-      "discriminator": [11, 133, 158, 232, 193, 19, 229, 73],
+      "discriminator": [
+        11,
+        133,
+        158,
+        232,
+        193,
+        19,
+        229,
+        73
+      ],
       "accounts": [
         {
           "name": "owner",
@@ -92,7 +227,15 @@
             "seeds": [
               {
                 "kind": "const",
-                "value": [108, 105, 115, 116, 105, 110, 103]
+                "value": [
+                  108,
+                  105,
+                  115,
+                  116,
+                  105,
+                  110,
+                  103
+                ]
               },
               {
                 "kind": "account",
@@ -114,7 +257,10 @@
         {
           "name": "capability_hash",
           "type": {
-            "array": ["u8", 32]
+            "array": [
+              "u8",
+              32
+            ]
           }
         },
         {
@@ -145,12 +291,23 @@
     },
     {
       "name": "update_service",
-      "discriminator": [46, 169, 26, 33, 191, 78, 40, 221],
+      "discriminator": [
+        46,
+        169,
+        26,
+        33,
+        191,
+        78,
+        40,
+        221
+      ],
       "accounts": [
         {
           "name": "owner",
           "signer": true,
-          "relations": ["listing"]
+          "relations": [
+            "listing"
+          ]
         },
         {
           "name": "listing",
@@ -159,7 +316,15 @@
             "seeds": [
               {
                 "kind": "const",
-                "value": [108, 105, 115, 116, 105, 110, 103]
+                "value": [
+                  108,
+                  105,
+                  115,
+                  116,
+                  105,
+                  110,
+                  103
+                ]
               },
               {
                 "kind": "account",
@@ -204,17 +369,44 @@
   "accounts": [
     {
       "name": "ServiceListing",
-      "discriminator": [117, 173, 54, 52, 146, 147, 124, 211]
+      "discriminator": [
+        117,
+        173,
+        54,
+        52,
+        146,
+        147,
+        124,
+        211
+      ]
     }
   ],
   "events": [
     {
       "name": "ServiceListingCreated",
-      "discriminator": [214, 51, 85, 39, 92, 202, 181, 120]
+      "discriminator": [
+        214,
+        51,
+        85,
+        39,
+        92,
+        202,
+        181,
+        120
+      ]
     },
     {
       "name": "ServiceListingUpdated",
-      "discriminator": [234, 45, 86, 218, 125, 0, 37, 210]
+      "discriminator": [
+        234,
+        45,
+        86,
+        218,
+        125,
+        0,
+        37,
+        210
+      ]
     }
   ],
   "errors": [
@@ -262,6 +454,11 @@
       "code": 6008,
       "name": "AlreadyActive",
       "msg": "Listing is already active"
+    },
+    {
+      "code": 6009,
+      "name": "JobsCompletedOverflow",
+      "msg": "jobs_completed counter would overflow u32"
     }
   ],
   "types": [
@@ -297,7 +494,10 @@
           {
             "name": "capability_hash",
             "type": {
-              "array": ["u8", 32]
+              "array": [
+                "u8",
+                32
+              ]
             }
           },
           {
@@ -359,7 +559,10 @@
           {
             "name": "capability_hash",
             "type": {
-              "array": ["u8", 32]
+              "array": [
+                "u8",
+                32
+              ]
             }
           },
           {

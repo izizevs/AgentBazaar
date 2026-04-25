@@ -5,32 +5,27 @@ anchor_version = "0.31.1"
 resolution = true
 skip-lint = false
 
-[workspace]
-members = [
-  "bazaar-registry",
-  "bazaar-escrow",
-  "bazaar-sla",
-  "bazaar-evaluator",
-]
+[programs.devnet]
+bazaar_escrow = "EhFptDs4mz6rt7HDmt8pB7ZogiqxUMVhpjB3NvToXxW2"
+bazaar_evaluator = "BxctnHyx9UJT7XobxHK3X548sSoPQB96Ca2fMEzYYMS8"
+bazaar_registry = "ADWoSmfUWLLRGMWZ61xuAMPhDgG77ziqAC5MA9voqLn3"
+bazaar_sla = "26rhkrBkf75ijDoDuhed8m94FkuhB2MukvqtWYEDegd8"
 
 [programs.localnet]
-bazaar_registry = "GJRgCCqkYvAezidpdd3i4p4kRRfJnM1EfGfgqYgchQqd"
-bazaar_escrow = "qTezZXasYhw2mUQiJC4FSpu1FrDWqawAWdAaWzvdzSs"
-bazaar_sla = "C94CzM5DRJnj73ZM5YA7PpPJKdmJZHWWFM4yM8aBRHU"
-bazaar_evaluator = "A1T7iQSYSuogzYme4HncjWoojuJ3WWT2BxEQ2xYp4ZUy"
-
-[programs.devnet]
-bazaar_registry = "GJRgCCqkYvAezidpdd3i4p4kRRfJnM1EfGfgqYgchQqd"
-bazaar_escrow = "qTezZXasYhw2mUQiJC4FSpu1FrDWqawAWdAaWzvdzSs"
-bazaar_sla = "C94CzM5DRJnj73ZM5YA7PpPJKdmJZHWWFM4yM8aBRHU"
-bazaar_evaluator = "A1T7iQSYSuogzYme4HncjWoojuJ3WWT2BxEQ2xYp4ZUy"
+bazaar_escrow = "EhFptDs4mz6rt7HDmt8pB7ZogiqxUMVhpjB3NvToXxW2"
+bazaar_evaluator = "BxctnHyx9UJT7XobxHK3X548sSoPQB96Ca2fMEzYYMS8"
+bazaar_registry = "ADWoSmfUWLLRGMWZ61xuAMPhDgG77ziqAC5MA9voqLn3"
+bazaar_sla = "26rhkrBkf75ijDoDuhed8m94FkuhB2MukvqtWYEDegd8"
 
 [registry]
 url = "https://api.apr.dev"
 
 [provider]
-cluster = "Localnet"
+cluster = "localnet"
 wallet = "~/.config/solana/id.json"
+
+[workspace]
+members = ["bazaar-registry", "bazaar-escrow", "bazaar-sla", "bazaar-evaluator"]
 
 [scripts]
 test = "node_modules/.bin/ts-mocha -p ./tsconfig.json -t 60000 tests/**/*.ts"

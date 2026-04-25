@@ -160,7 +160,7 @@ describe('bazaar-registry', () => {
     });
 
     it('rejects metadata_uri longer than 64 chars', async () => {
-      const tooLong = 'ipfs://' + 'a'.repeat(80);
+      const tooLong = `ipfs://${'a'.repeat(80)}`;
       try {
         await program.methods
           .registerService([...capabilityHash], new BN(1), new BN(100), 0, emptySla(), tooLong)

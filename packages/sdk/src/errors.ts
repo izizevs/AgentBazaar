@@ -17,11 +17,7 @@ export class NotImplementedError extends AgentBazaarError {
 }
 
 /** Thrown when client-side input validation fails (Zod schema or range guard). */
-export class ValidationError extends AgentBazaarError {
-  constructor(message: string, options?: ErrorOptions) {
-    super(message, options);
-  }
-}
+export class ValidationError extends AgentBazaarError {}
 
 /**
  * Thrown when a transaction fails on-chain after all retry attempts.
@@ -51,18 +47,10 @@ export class InsufficientFundsError extends AgentBazaarError {
 }
 
 /** Thrown when the metadata_uri upload to Pinata/Arweave fails. */
-export class MetadataUploadError extends AgentBazaarError {
-  constructor(message: string, options?: ErrorOptions) {
-    super(message, options);
-  }
-}
+export class MetadataUploadError extends AgentBazaarError {}
 
 /** Thrown when register() finds an already-active listing for the same capability. */
-export class DuplicateListingError extends AgentBazaarError {
-  constructor(message: string, options?: ErrorOptions) {
-    super(message, options);
-  }
-}
+export class DuplicateListingError extends AgentBazaarError {}
 
 /**
  * Thrown when the Discovery API is unreachable, returns a non-2xx status,
@@ -79,11 +67,7 @@ export class DiscoveryAPIError extends AgentBazaarError {
 }
 
 /** Thrown when the Discovery API fails and the RPC fallback also fails. */
-export class RPCFallbackFailedError extends AgentBazaarError {
-  constructor(message: string, options?: ErrorOptions) {
-    super(message, options);
-  }
-}
+export class RPCFallbackFailedError extends AgentBazaarError {}
 
 /**
  * Thrown when discover() degrades to the RPC fallback and one or more requested

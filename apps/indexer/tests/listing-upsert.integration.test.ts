@@ -81,7 +81,6 @@ describe.skipIf(process.env.INTEGRATION !== 'true')(
         FROM service_listings WHERE pubkey = ${PUBKEY}
       `;
       expect(rows).toHaveLength(1);
-      // biome-ignore lint/style/noNonNullAssertion: length asserted above
       const row = rows[0]!;
       expect(row.owner).toBe(OWNER);
       expect(String(row.price_lamports)).toBe('1000000');
@@ -106,7 +105,6 @@ describe.skipIf(process.env.INTEGRATION !== 'true')(
         SELECT price_lamports FROM service_listings WHERE pubkey = ${PUBKEY}
       `;
       expect(rows).toHaveLength(1);
-      // biome-ignore lint/style/noNonNullAssertion: length asserted above
       expect(String(rows[0]!.price_lamports)).toBe('1000000');
     });
 
@@ -119,9 +117,7 @@ describe.skipIf(process.env.INTEGRATION !== 'true')(
       const rows = await sql`
         SELECT price_lamports, is_active FROM service_listings WHERE pubkey = ${PUBKEY}
       `;
-      // biome-ignore lint/style/noNonNullAssertion: row must exist after create
       expect(String(rows[0]!.price_lamports)).toBe('5000000');
-      // biome-ignore lint/style/noNonNullAssertion: row must exist after create
       expect(rows[0]!.is_active).toBe(true);
     });
 
@@ -129,7 +125,6 @@ describe.skipIf(process.env.INTEGRATION !== 'true')(
       await onListingUpdated(`${RUN}-update-deactivate`, updatedData({ isActive: false }));
 
       const rows = await sql`SELECT is_active FROM service_listings WHERE pubkey = ${PUBKEY}`;
-      // biome-ignore lint/style/noNonNullAssertion: row must exist after create
       expect(rows[0]!.is_active).toBe(false);
     });
 
@@ -147,11 +142,8 @@ describe.skipIf(process.env.INTEGRATION !== 'true')(
       const rows = await sql`
         SELECT price_lamports, metadata_uri, is_active FROM service_listings WHERE pubkey = ${PUBKEY}
       `;
-      // biome-ignore lint/style/noNonNullAssertion: row must exist after create
       expect(String(rows[0]!.price_lamports)).toBe('2500000');
-      // biome-ignore lint/style/noNonNullAssertion: row must exist after create
       expect(rows[0]!.metadata_uri).toBe(newUri);
-      // biome-ignore lint/style/noNonNullAssertion: row must exist after create
       expect(rows[0]!.is_active).toBe(true);
     });
   },

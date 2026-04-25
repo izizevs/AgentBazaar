@@ -16,11 +16,11 @@ describe('bazaar-registry IDL', () => {
   });
 
   it('has expected program address', () => {
-    expect(IDL.address).toBe('GJRgCCqkYvAezidpdd3i4p4kRRfJnM1EfGfgqYgchQqd');
+    expect(IDL.address).toBe('ADWoSmfUWLLRGMWZ61xuAMPhDgG77ziqAC5MA9voqLn3');
   });
 
-  it('has 4 instructions', () => {
-    expect(IDL.instructions).toHaveLength(4);
+  it('has 5 instructions', () => {
+    expect(IDL.instructions).toHaveLength(5);
   });
 
   it('has ServiceListing account', () => {
