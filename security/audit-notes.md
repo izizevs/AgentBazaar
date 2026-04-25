@@ -1354,3 +1354,128 @@ None of these block PR #22's merge — scaffold is syntactically
 correct, test passes by accident (server-side-effect masked by
 in-process `app.fetch`). Worth fixing before the next PR layers
 business logic on top.
+
+---
+
+## PR #26 — feature/sdk-error-hierarchy-v2 — 2026-04-25
+**Verdict:** APPROVED. No findings at any severity. Two informational
+observations only.
+
+Task #15 — SDK error hierarchy refactor: structured fields, cause-chain
+support throughout, three new error classes
+(`DegradedDiscoveryError`, `WalletNotConnectedError`, `IDLMismatchError`),
+constructor signature updates with backward compatibility,
+comprehensive test coverage. Also folds in **L7 fix from PR #19's
+audit follow-up**: `discover()` now throws
+`DegradedDiscoveryError(['minReputation'])` when RPC fallback is taken
+with `minReputation > 0`, instead of silently returning `[]`.
+
+**Scope walked:**
+- `packages/sdk/src/errors.ts` (+113 / -19) — base + 11 typed errors
+- `packages/sdk/src/discover.ts` (+18 / -2) — `DegradedDiscoveryError` integration
+- `packages/sdk/src/index.ts` (+3) — three new exports
+- `packages/sdk/tests/errors.test.ts` (new, +236)
+- `packages/sdk/tests/discover.test.ts` (+32 / -1) — three L7 tests
+- `packages/sdk/README.md` (new, +87) — public API docs
+
+**Five focus-area answers (sdk-eng's checklist):**
+
+1. ✅ **`DegradedDiscoveryError.filtersDropped` is `Object.freeze()`-d.**
+   Constructor calls `Object.freeze(filtersDropped)` and the field is
+   typed `readonly string[]`. Both compile-time (TS `readonly`) and
+   runtime (frozen) immutability. Test `filtersDropped is frozen at
+   runtime` asserts `.push(...)` throws in strict mode (Vitest's
+   default). `Object.freeze` is shallow, but the array contains
+   primitives, so shallow is sufficient.
+
+2. ✅ **`TransactionFailedError` constructor change is backward-compatible.**
+   Old: `(message, public readonly signature?)`. New:
+   `(message: string, signature?: string, options?: ErrorOptions)`.
+   `signature` is now declared as a class field with explicit
+   `readonly signature?: string` and assigned in the constructor body.
+   The new third arg is optional. Both call sites in
+   `packages/sdk/src/register.ts` (lines 185 and 197 on this branch)
+   pass exactly `(message, signature)` — work unchanged. Test
+   `propagates cause` exercises the new `options?` arg.
+
+3. ✅ **`DiscoveryAPIError` new `statusCode?` second arg is opt-in.**
+   Existing throws in `discover.ts` (lines 91-94, 96-98, 105-108)
+   pass zero args for `statusCode`, leaving it `undefined`.
+   Backward-compatible. *(See O2 below — the 4xx/5xx site could
+   profitably pass `res.status`, but that's polish.)*
+
+4. ✅ **`InsufficientFundsError` exported but not yet thrown.**
+   Confirmed via grep — no `throw new InsufficientFundsError(`
+   anywhere in the SDK. Pre-emptive export so consumers can
+   `catch (err) { if (err instanceof InsufficientFundsError) ... }`
+   once `hire` lands. Constructor stores both `required` /
+   `available` as `readonly bigint`. Same pattern applies to
+   `WalletNotConnectedError` and `IDLMismatchError` — all three are
+   forward-declarations for upcoming flows.
+
+5. ✅ **All cause chains verified in tests.** Every error class that
+   accepts `options?: ErrorOptions` has a "propagates cause" test
+   (eight tests across the suite). Base class `AgentBazaarError`
+   correctly forwards `options` to `super()`; Node 16.9+ /
+   lib.es2022 `Error` semantics propagate `cause` to the resulting
+   instance.
+
+**L7 fix — `DegradedDiscoveryError` in `discover.ts`:**
+After successful RPC fallback, the new guard:
+```ts
+if (validated.minReputation !== undefined && validated.minReputation > 0) {
+  throw new DegradedDiscoveryError(['minReputation']);
+}
+```
+…replaces the silent-zero-result behaviour from PR #19 L7. Three new
+discover-test cases:
+1. `throws DegradedDiscoveryError when minReputation > 0 and RPC fallback is active`,
+2. `DegradedDiscoveryError.filtersDropped includes minReputation`,
+3. `minReputation 0 does NOT throw (reputation 0 passes the filter)` —
+   protects against a regression on the boundary `minReputation: 0`.
+
+**L7 closed.**
+
+**Two informational observations (not findings):**
+
+- **O1. O8 from PR #21 re-review (base58 refinement) is NOT in this PR.**
+  Per team-lead's earlier routing
+  ("O8 от твоего PR #21 re-review (base58 refinement) добавлен в
+  Task #10 sdk-eng's checklist — запушит вместе с errors hierarchy"),
+  the base58 refinement on `listing` / `owner` in
+  `APIServiceEntrySchema` was expected to land alongside this work.
+  `discover.ts` schema is unchanged in this PR — `listing: z.string()`
+  and `owner: z.string()` still survive non-base58 inputs and crash
+  `new PublicKey()` outside the try block, escaping the
+  `DiscoveryAPIError` fallback. Worth confirming with sdk-eng whether
+  this was deferred to a follow-up PR or simply missed. Not a finding
+  in THIS PR's scope (Task #15 is errors-hierarchy, not
+  discover-schema), but a tracking flag so the residual doesn't slip.
+
+- **O2. `DiscoveryAPIError.statusCode` is unused at the existing throw
+  sites.** The 4xx/5xx case in `discover.ts`:
+  ```ts
+  if (!res.ok) {
+    throw new DiscoveryAPIError(`Discovery API error: ${res.status} ${res.statusText}`);
+  }
+  ```
+  could pass `res.status` as the new second arg so callers can
+  `if (err instanceof DiscoveryAPIError && err.statusCode === 401) ...`
+  without parsing the message. Polish; routes naturally with O1's
+  follow-up.
+
+**Cross-cutting tracking (informational):**
+- L7 from PR #19 → ✅ closed in this PR.
+- L6 from PR #19 → still backend-eng's M1 indexer work.
+- O8 from PR #21 → flagged in O1 above; confirm with sdk-eng.
+- M2 from PR #2 (`price_lamports` IDL rename) → still anchor-eng's.
+
+**Mainnet release-gate verdict (security side):** N/A — errors-hierarchy
+refactor is plumbing, not a flow. The L7 fix is a UX-correctness
+improvement on the already-cleared `discover()` path; doesn't unblock
+or block anything new.
+
+Cleared to merge. Particularly clean test discipline — the 11-class
+`it.each` matrix for inheritance is forward-compatible: any new error
+class auto-inherits the `instanceof AgentBazaarError` + `name`
+invariants by being added to the `allClasses` array.
