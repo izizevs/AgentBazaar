@@ -2458,3 +2458,134 @@ finding of the M0 trajectory. The patterns from earlier audits
 / PR #26) need to extend to *outbound* HTTP at the indexer
 boundary the same way they extended to *inbound* HTTP at the
 SDK / API / webhook boundary.
+
+---
+
+## PR #44 — feature/backend-integration-test — 2026-04-25 (final substantial audit)
+
+**Verdict:** **APPROVED. Production-deploy gate CLEAR.** All findings
+from the PR #40 audit closed cleanly: H1 SSRF (4 layers), M1 path
+traversal, M2 in `fetch-metadata.ts`, AND M2-residual in
+`on-listing-updated.ts:newUri`. The single residual log-site I missed
+in the original audit's scope is now fixed; the `safeLogUrl`
+extraction makes the fix reusable for future log sites.
+
+This is the **final substantive M0 indexer audit** before backend-eng
+closes their M0 scope. PR #44 bundles:
+1. Task #16 integration tests (originally PR #44 scope)
+2. H1 SSRF hardening (originally PR #45, now folded in)
+3. M1 path traversal fix
+4. M2 in `fetch-metadata.ts`
+5. M2-residual fix (the scope-miss flag — `newUri` log)
+6. `safeLogUrl` extracted to `apps/indexer/src/util/safe-log-url.ts`
+
+**Scope walked (5 files):**
+- `apps/indexer/src/util/safe-log-url.ts` (new, +10) — extracted helper
+- `apps/indexer/src/events/fetch-metadata.ts` (+82 / -12) — H1+M1+M2
+- `apps/indexer/src/events/on-listing-updated.ts` (+8 / -1) — M2-residual
+- `apps/indexer/tests/listing-upsert.integration.test.ts` (new, +158)
+- `apps/indexer/package.json` (+1) — `pnpm test:integration` script
+
+**Four checkpoints (team-lead's questions):**
+
+1. ✅ **`safeLogUrl` util extraction correct, no regression in
+   fetch-metadata.ts.** The new helper in `util/safe-log-url.ts` is
+   byte-identical to the original local copy. `fetch-metadata.ts`
+   imports from `'../util/safe-log-url.js'` and removes the local
+   definition; all seven log sites continue to call `safeLogUrl(...)`.
+
+2. ✅ **M2-residual in `on-listing-updated.ts` truly closed.**
+   Last block of `onListingUpdated` now does
+   `newUri: newUri ? safeLogUrl(newUri) : null` — sanitized when
+   present, `null` preserved when no URI update.
+
+   **Sweep across all indexer log sites for any other attacker-controlled
+   URL leak:**
+   - `webhooks/handler.ts:14` — generic auth-rejected message, no
+     payload data. ✅
+   - `webhooks/handler.ts:27` — `{ issues: result.error.issues }`.
+     Zod issues show field path + reason; don't echo raw rejected
+     values by default. ✅
+   - `webhooks/handler.ts:76` — `{ err, txSignature, event: event.name }`.
+     `err` is from upsert path; postgres-js doesn't include binding
+     values in errors by default. Theoretical-only — see **I3**.
+   - `webhooks/handler.ts:86` — counts only. ✅
+   - `events/on-listing-created.ts:65` — `capability` from
+     `MetadataSchema.parse`-validated string; other fields are
+     Borsh-decoded on-chain bytes. ✅
+   - `index.ts:8` — validated env. ✅
+   - `webhooks/auth.ts` / `logger.ts` — no logger calls. ✅
+
+   **Sweep result:** M2-residual was the only at-risk site; it is
+   now closed.
+
+3. ✅ **H1 SSRF four layers intact after cherry-pick + bundling.**
+   Re-walked end-to-end:
+   - Layer 1 — `resolveIpfsUrl` returns `null` for non-`ipfs://` /
+     non-`https://`. Identical to f000b35.
+   - Layer 2 — `isPrivateAddress` matches RFC 1918 + 127/8 + 169.254/16
+     + ::1 + fe80::; fail-closed on DNS failure. Identical.
+   - Layer 3 — `redirect: 'error'` in the fetch call.
+   - Layer 4 — Content-Length pre-check + post-text length check at
+     100 KB. Same partial-protection nuance (I1).
+
+   No regression from the bundling.
+
+4. ✅ **Integration test coverage adequate for production confidence.**
+   Five round-trip scenarios cover the upsert state machine: insert;
+   idempotent re-create; price-only update; deactivate; price+URI
+   update. Together they hit the four branches of `onListingUpdated`'s
+   SQL conditional. Coverage gap (informational): no integration test
+   exercises `fetchMetadata` because `vi.mock` returns null — see I2
+   for the pre-mainnet unit-test PR.
+
+**Findings:**
+- **Critical / High / Medium:** none — all closed.
+- **Low:** none in this PR's diff. Carryover Lows (L2 decoder Zod from
+  PR #40, L2 retention TTL from PR #35) remain pre-mainnet polish.
+
+**Three informational notes (pre-mainnet polish, not blocking):**
+
+- **I1.** Response-size cap is partial — `await res.text()` buffers
+  full body before the post-check; AbortSignal caps the unbounded
+  case to ~10 s × bandwidth. Streaming-with-byte-counter is the
+  bulletproof pattern.
+- **I2.** No unit tests for `fetch-metadata.ts` itself. The four
+  layers are obvious from inspection but a focused test PR (mock
+  `fetch` + `dns.lookup`, assert each layer rejects the right inputs)
+  would lock the contract in.
+- **I3.** `webhooks/handler.ts:76` `logger.error({ err, ... })`
+  could theoretically leak attacker-controlled data via postgres-js
+  error messages if pg config ever included binding values. Default
+  config doesn't. Defense-in-depth: consider a `safeLogError` helper
+  that strips bind parameters from pg errors before logging.
+
+**Mainnet release-gate verdict:**
+- **M0 devnet:** APPROVED.
+- **Production deploy:** **CLEAR.** Four-layer SSRF defense in place;
+  M2 credential-leak surface closed across all attacker-controlled
+  log sites; integration tests give upsert-layer confidence.
+  **Backend-eng's M0 scope is production-ready.** Pre-mainnet polish
+  (I1/I2/I3 + carryover Lows) doesn't gate production.
+
+**Carryforward status:**
+- ✅ L7 (PR #19) → closed in PR #26.
+- ✅ O8 (PR #21) → closed in `ecc3e0a`.
+- ✅ L1 (PR #32) → closed via PR #35.
+- ✅ M1+L1 (PR #35) → closed in `f4a902f`.
+- ✅ H1+M1+M2 (PR #40) → closed in PR #44 (this PR).
+- ✅ M2-residual → closed in PR #44 (this PR).
+- ⏳ L2 retention TTL (PR #35), L2 decoder Zod (PR #40), I1/I2/I3 here
+  — all pre-mainnet polish.
+- ⏳ M2 from PR #2 (`price_lamports` rename) — anchor-eng for M1.
+
+**Pattern observation (final):** the discipline pattern from earlier
+audits (Zod-first, fail-fast, scheme refines, `safeLogUrl`-style
+sanitization) now extends consistently across **inbound** boundaries
+(SDK Pinata upload, Discovery API responses, webhook auth) AND
+**outbound** boundaries (`fetchMetadata`). Every attacker-controlled
+URL is sanitized before logging, every external response is
+schema-validated, every fetch has a four-layer SSRF defense. The
+indexer is production-ready from the security side.
+
+**Backend-eng's M0 scope: DONE. Cleared for production.**
