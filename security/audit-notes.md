@@ -3661,3 +3661,229 @@ fixed substantively, M1 documented). Final merge gate requires the
 trivial typecheck fix (`tests/hire.test.ts:248`). Once CI is green I'll
 flip to unconditional ✅ APPROVE without a second walk — the substantive
 diff is already accepted.
+
+(Final ACK at commit aaa46e2 — CI confirmed green, sdk-eng applied
+optional-chain fix, PR #59 + #60 merged. The post-CI ACK commit was
+pushed after PR #60 squash-merged so it didn't make it into the merged
+content; recording the resolution here for the audit log.)
+
+---
+
+## PR #58 — feature/backend-escrow-event-handlers — 2026-04-25
+**Verdict:** ✅ **APPROVE** — no critical/high findings; 2 MEDIUM
+operational concerns (transaction boundary in SLA handler + missing
+retry path for failed handlers) recommended for follow-up but do not
+block merge. Architecture is sound and follows the M0-established
+patterns (atomic INSERT-RETURNING dedup from PR #35, safeLogUrl from
+PR #44).
+
+**Scope of review:**
+- `apps/indexer/src/events/escrow-decoder.ts` (new, 105 lines) —
+  BorshEventCoder usage + enum-variant normalization
+- `apps/indexer/src/events/on-escrow-created.ts` (new, 48 lines) —
+  INSERT with ON CONFLICT, vault PDA derivation
+- `apps/indexer/src/events/on-escrow-state-changed.ts` (new, 25 lines)
+- `apps/indexer/src/events/on-delivery-submitted.ts` (new, 31 lines)
+- `apps/indexer/src/events/on-sla-report.ts` (new, 42 lines) — most
+  security-relevant: dual-table write + reputation math
+- `apps/indexer/src/events/on-dispute-opened.ts` (new, 28 lines)
+- `apps/indexer/src/webhooks/handler.ts` (+85 / -3) — event dispatch
+  loop additions
+- Schema (`apps/indexer/src/db/schema.ts:129-150`) cross-checked for
+  `sla_reports` (no unique on `escrow_pubkey`; bigserial PK) and
+  `agent_reputation` (wallet PK, jobs_completed/total_score bigint,
+  avg_score smallint).
+
+This is the indexer-side consumer of the events emitted by the audited
+escrow program (PR #51) and produced by the audited SDK (PR #59). The
+trust boundary here is one-way (chain → DB), so the audit focus is
+*data integrity* and *replay safety* rather than authority/fund-flow.
+
+### Findings
+
+#### Critical / High — none.
+
+#### Medium
+
+- **M1. No transaction around the dual INSERT in `on-sla-report.ts`.**
+  The handler does two separate SQL statements:
+  ```ts
+  await sql`INSERT INTO sla_reports (...) VALUES (...)`;
+  await sql`INSERT INTO agent_reputation (...) ON CONFLICT (wallet) DO UPDATE ...`;
+  ```
+  These are not in a `sql.begin(...)` transaction. If the second statement
+  fails (lock timeout, connection drop, deadlock), the system ends up in
+  an inconsistent state: `sla_reports` has the SLA row but
+  `agent_reputation` was not updated. The outer dedup
+  (`processed_signatures` already has the signature inserted) means the
+  handler will not be retried — the inconsistency is sticky until manual
+  backfill.
+
+  Severity rationale: doesn't expose funds, doesn't expose secrets, but
+  the user-facing reputation count drifts from the audit trail. On the
+  next SLAReport for the same seller, the UPSERT works fine and partly
+  compensates (jobs_completed catches up by one), but the lost score
+  point doesn't come back.
+
+  **Recommended fix.** Wrap both inserts in a transaction:
+  ```ts
+  await sql.begin(async (tx) => {
+      await tx`INSERT INTO sla_reports ...`;
+      await tx`INSERT INTO agent_reputation ... ON CONFLICT ...`;
+  });
+  ```
+  Alternative: order the writes so the source-of-truth (`sla_reports`)
+  lands first and a periodic backfill job recomputes
+  `agent_reputation` from `sla_reports` aggregates. The transaction is
+  cheaper for steady state.
+
+- **M2. Failed event handler leaves the processed_signature inserted →
+  no automatic retry.** In `handler.ts:48-58`, signatures are inserted
+  into `processed_signatures` *before* the per-event handlers run. If a
+  handler throws (caught at line 83-87 / 110-114 and only logged), the
+  signature is already marked processed → the same event will be skipped
+  on any future delivery attempt by Helius. Recovery requires:
+  (a) detecting the failure from logs and (b) running a backfill from
+  on-chain.
+
+  This is a deliberate design tradeoff (avoid duplicate processing >
+  guarantee processing), and matches the M0 pattern. But for funds- and
+  reputation-relevant events the cost of a missed event is high. Two
+  mitigations to consider:
+  - Move the dedup-INSERT into the per-event try block, so failures
+    leave the signature *not* yet inserted and Helius can retry.
+  - Add an `events_failed` table that captures failed event payloads
+    (signature, event name, error) for visibility + manual replay.
+
+  Non-blocking; this PR can ship as-is, but worth a follow-up issue
+  before mainnet.
+
+#### Low
+
+- **L1. No `ON CONFLICT DO NOTHING` on `sla_reports` INSERT.** The
+  schema has a `bigserial` PK and no unique constraint on
+  `escrow_pubkey`, so a duplicate insert *succeeds* and creates a
+  duplicate row. In normal flow the outer dedup (`processed_signatures`)
+  prevents this; in failure modes (manual replay, dedup table wiped,
+  multi-instance race) it would not. Defense-in-depth: add a unique
+  constraint on `(escrow_pubkey)` (escrow only emits one SLAReport per
+  lifecycle per the on-chain state machine) and `ON CONFLICT
+  (escrow_pubkey) DO NOTHING`.
+
+- **L2. `decodeEscrowState` silently coerces unknown enum variants.**
+  ```ts
+  if (key === 'timeoutClaimed') return 'timeout_claimed';
+  return key as EscrowState;  // ← any other key passes through
+  ```
+  If a future on-chain program adds an enum variant (e.g. `arbitrated`
+  for V1 dispute resolution), the decoder returns that string and the
+  SQL UPDATE will fail with a type-mismatch on the `EscrowState` column
+  type — but the failure surface is "SQL error in production logs"
+  rather than "indexer rejects unknown event with a typed error."
+  Tighten with an allowlist:
+  ```ts
+  const ALLOWED: EscrowState[] = ['created', 'delivered', 'confirmed',
+                                  'disputed', 'timeout_claimed'];
+  if (!ALLOWED.includes(mapped as EscrowState)) {
+      throw new Error(`Unknown escrow state variant: ${key}`);
+  }
+  ```
+
+- **L3. `process.env.DATABASE_URL` fallback silently disables dedup.**
+  `handler.ts:48`:
+  ```ts
+  if (process.env.DATABASE_URL) {
+      // dedup logic
+  }
+  // ← if DATABASE_URL unset, all events get processed without dedup
+  ```
+  In production DATABASE_URL is always set (per the docker-compose
+  injection pattern in CLAUDE.md). But a misconfiguration would silently
+  process duplicates. Better to fail loud at startup if the indexer
+  binary is invoked without DATABASE_URL — or to have an explicit
+  `INDEXER_DEDUP_DISABLED` env flag for test mode. Non-blocking, but
+  flagged.
+
+- **L4. UPDATEs match 0 rows silently when EscrowCreated was missed.**
+  `on-escrow-state-changed.ts`, `on-delivery-submitted.ts`,
+  `on-dispute-opened.ts` all `UPDATE escrows ... WHERE pubkey = X`
+  without checking the affected row count. If `EscrowCreated` was
+  dropped (handler downtime, decoder bug, dedup-related skip), all
+  subsequent state changes for that escrow become silent no-ops. The
+  on-chain state advances; the DB stays at "non-existent." Low because
+  it's recoverable via backfill, but worth a defensive log:
+  ```ts
+  const result = await sql`UPDATE escrows SET ... WHERE pubkey = ${pk}`;
+  if (result.count === 0) logger.warn({ pk }, 'state update matched 0 rows');
+  ```
+
+- **L5. No off-chain size validation on `resultUri` / `evidenceUri`.**
+  On-chain enforces `MAX_RESULT_URI = 128` and `MAX_EVIDENCE_URI = 128`
+  (PR #51 audit), so the events can't exceed those bounds. But the
+  indexer doesn't independently validate, so a future on-chain
+  loosening (or a buggy event-decoder mis-parse) could land a
+  multi-megabyte string into the DB column. Defense-in-depth:
+  validate length client-side before INSERT.
+
+#### Informational
+
+- **I1.** `safeLogUrl(resultUri)` and `safeLogUrl(evidenceUri)` are
+  consistently used in log payloads (`on-delivery-submitted.ts:27`,
+  `on-dispute-opened.ts:23`). The PR #44 carryforward landed cleanly
+  in this PR — same scrubbing helper, same call shape. ✅
+- **I2.** Reputation UPSERT in `on-sla-report.ts:24-35` correctly
+  avoids the read-modify-write race that a naive
+  `SELECT then UPDATE` would have. The single-statement
+  `agent_reputation.total_score + ${score}` reads from the row state
+  *as it exists during the UPDATE's row lock*, so concurrent UPSERTs
+  for the same wallet serialize correctly via Postgres's row-lock
+  semantics. The math is correct: `total_score` becomes
+  `(prior_total + score)`, `avg_score` is `ROUND((prior_total + score) /
+  (prior_jobs + 1))` using the new total. score range guaranteed to be
+  0–100 by PR #59 L1 fix (`require!(score <= 100)`). ✅
+- **I3. `ESCROW_PROGRAM_ID = 'EhFp…XxW2'`** matches the `declare_id!`
+  in `bazaar-escrow` on main and the SDK's `ESCROW_PROGRAM_ID` (per
+  PR #53 sync, verified during PR #59 audit). The vault PDA derivation
+  in `on-escrow-created.ts:11-17` uses seeds `[b"vault", escrow]` —
+  matches the on-chain seeds (PR #51). ✅
+- **I4. Per-event try/catch in `handler.ts:83-87` and 110-114** ensures
+  one failed handler doesn't break the rest of the batch. Standard
+  pattern; correct here. ✅
+
+### Sanity-check answers
+
+1. ✅ **No hardcoded secrets.** Pass — no API keys, no DB
+   credentials. `DATABASE_URL` is from env.
+2. ✅ **No mainnet references.** Pass — the program IDs hardcoded are
+   the devnet program IDs (matching the rest of the codebase post-PR #53).
+3. ✅ **No admin-key footprint.** Pass — the indexer is a read-only
+   chain consumer; it never holds keys, never signs anything, never
+   mutates on-chain state. The only "authority" it asserts is to its own
+   Postgres database.
+
+### Carryforward to backend-eng (post-merge follow-ups)
+
+- **M1**: wrap `on-sla-report.ts` dual-write in a transaction. Single-PR
+  fix; small.
+- **M2**: design decision — either move dedup-INSERT into per-event try
+  block, or add an `events_failed` table for retry visibility. Worth an
+  ADR before mainnet.
+- L1: add unique constraint + ON CONFLICT on sla_reports.
+- L2: allowlist-based `decodeEscrowState`.
+- L3: fail-loud-or-flag-test for missing DATABASE_URL.
+- L4: warn-on-zero-rows-affected pattern across all UPDATEs.
+- L5: client-side length cap on URI fields.
+
+### Verdict
+
+✅ **APPROVE** for merge. CI green. The handler architecture is sound,
+the reputation math is correct, the safeLogUrl + atomic-INSERT-RETURNING
+patterns from PR #35/#44 are correctly carried forward. M1 + M2 are
+operational concerns that affect data consistency in failure cases but
+don't expose security risk and don't block merge.
+
+The trust-boundary surface here is narrow (chain events → DB rows), and
+the on-chain hardening from PR #51 means the events themselves are
+trustworthy by the time they reach this layer. The audit pattern shifts
+appropriately for the off-chain consumer: less authority/fund-flow, more
+data-integrity/replay-safety.
