@@ -15,7 +15,8 @@
       "!**/node_modules",
       "!**/*.generated.*",
       "!**/.turbo",
-      "!**/coverage"
+      "!**/coverage",
+      "!**/.worktrees"
     ]
   },
   "formatter": {
@@ -60,6 +61,16 @@
         "rules": {
           "suspicious": {
             "noExplicitAny": "off"
+          }
+        }
+      }
+    },
+    {
+      "includes": ["**/tests/**", "**/*.test.ts", "**/*.spec.ts"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noNonNullAssertion": "off"
           }
         }
       }
