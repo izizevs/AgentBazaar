@@ -4486,3 +4486,175 @@ Carryforwards (non-blocking):
   plaintext keypair is intentionally public.
 - **I7 (cosmetic):** PR title task-number drift; harmless.
 
+---
+
+## PR #72 — Task #37 rename `price_lamports` → `price_usdc_base_units`
+
+**Reviewer:** security-auditor
+**Date:** 2026-04-25
+**Branch:** `feature/anchor-usdc-rename` → `main`
+**Head SHA:** `166326827898ceb2f4c372032d999d3e50a45bc8`
+**CI status:** ✅ green (run 24943615349 — Lint + typecheck + test)
+**Closes:** PR #2 M2 audit finding ("`price_lamports` field name misleading
+for a USDC-settled marketplace; rename to `price_base_units` /
+`price_usdc_base_units` before SDK publish").
+
+### Audit depth
+
+**Light** — pure rename refactor, no semantic / fund-flow change.
+
+### Scope
+
+Stack-wide rename of the price field across:
+- On-chain: `bazaar-registry/src/lib.rs` — `register_service` arg,
+  `update_service_price` argument flow, `ServiceListing` account field,
+  `ServiceListingCreated` event field
+- IDL: `packages/idl/idl/bazaar_*.json` + generated `*.ts` types
+- SDK: `register.ts`, `discover.ts`, test mocks
+- Indexer: decoder typed shape, `on-listing-created` handler, integration
+  tests
+- Tests: program tests, E2E lifecycle tests, state-assertion helpers
+
+Diff: +349 / −42 across 15 files. Most of the line count comes from the
+IDL JSON regenerating with the (already-merged) `emit_cpi!` event_authority
+PDA blocks and the (already-merged) USDC mint pinning — those changes
+are not introduced by this PR; they're just propagating because the IDL
+was last regenerated on an older program. The actual logical change is a
+~30-line rename.
+
+### Audit checklist results
+
+**1. Rename complete?**
+✅ All on-chain, IDL, SDK, and indexer **TS** call sites use
+`price_usdc_base_units` / `priceUsdcBaseUnits`. Verified via repo-wide
+`grep -rn "priceLamports\|price_lamports"` — every remaining hit is on
+a Postgres **column name** (the underlying DB column is *not* renamed in
+this PR; see L1 below) or a test description string. No stale references
+in production semantic code paths.
+
+**2. IDL field rename propagated to TS types?**
+✅ Both `packages/idl/idl/bazaar_*.json` (Rust-IDL JSON, snake_case
+field) and `packages/idl/src/bazaar-*.ts` (TS-generated types,
+camelCase) are aligned. The decoder's typed shape
+(`ServiceListingCreatedData`) matches.
+
+**3. Semantic equivalence?**
+✅ Same `u64`, same byte width, same field position in the Borsh-
+serialized account / event layout. Borsh is positional, not name-keyed,
+so:
+- Existing on-chain `ServiceListing` accounts created under the old
+  field name *deserialize correctly* under the new field name. No
+  data migration required for the program upgrade.
+- Existing `ServiceListingCreated` events emitted by the pre-upgrade
+  program *decode correctly* via `BorshEventCoder` keyed against the
+  new IDL — the JS field name is just what the IDL types say; the byte
+  layout is unchanged.
+- Account / instruction discriminators are derived from the **struct
+  name** (`ServiceListing`) / **fn name** (`register_service`) —
+  unchanged. No discriminator drift.
+
+**4. Tests still cover same behavior?**
+✅ `programs/tests/bazaar-registry.ts` updated: assertions
+`acct.priceUsdcBaseUnits.toNumber()` mirror prior `acct.priceLamports`
+checks. Coverage equivalent.
+✅ `tests/e2e/register-discover.test.ts` + `state-assertions.ts`
+updated to assert `priceUsdcBaseUnits` against the on-chain account.
+Same assertion semantics.
+✅ SDK unit test (`packages/sdk/tests/discover.test.ts`) updated.
+✅ Indexer integration test fixtures updated.
+
+**5. CI green?**
+✅ Run `24943615349` (Lint + typecheck + test) succeeded at 23:52:15Z.
+
+### Findings
+
+- **Critical:** none.
+- **High:** none.
+- **Medium:** none.
+- **Low:**
+  - **L1. DB column `price_lamports` retained.** The Drizzle TS
+    field renames from `priceLamports` → `priceUsdcBaseUnits`, but the
+    underlying Postgres column name is unchanged
+    (`bigint('price_lamports', ...)`). All raw-SQL queries
+    (`INSERT ... price_lamports ...`, `SET price_lamports = ...`,
+    `SELECT price_lamports FROM ...`, the
+    `idx_service_listings_discover` covering index, the migration-test
+    column allowlist) still target the legacy column name and remain
+    correct as-is. This is a *deliberate* deferral — a column rename
+    would require a Drizzle migration and a coordinated indexer
+    redeploy. Naming friction only; no correctness or security impact.
+    **Carryforward**: bundle a `price_lamports` →
+    `price_usdc_base_units` column rename + Drizzle migration with a
+    future indexer release window (post-mainnet would be cleanest, so
+    devnet replays don't trip).
+  - **L2. Test description "updates price_lamports on
+    ServiceListingUpdated"** in
+    `apps/indexer/tests/listing-upsert.integration.test.ts:111`. The
+    test description references the legacy column name. Cosmetic, but
+    mildly misleading after this PR lands. Carryforward as part of L1
+    cleanup.
+
+- **Informational:**
+  - **I1. Indexer hot-fix `instruction-decoder.ts` (uncommitted
+    fallback path) still references `priceLamports`.** This file is
+    *not* tracked by git on `pr72-head` (verified via
+    `git ls-files`); it lives only in working trees of agents who
+    pulled an earlier WIP. It will become relevant under Task #41
+    ("indexer revert hot-fix patches") — the revert author should
+    confirm any remaining hot-fix decoder paths use
+    `priceUsdcBaseUnits`. Not in PR #72's scope.
+  - **I2. Comment block in `apps/indexer/src/db/schema.ts` removed.**
+    The pre-PR schema carried a 3-line `NOTE: security-auditor PR #2
+    M2 flagged this field as misleading…` comment justifying the
+    legacy name. The PR drops the comment because the rename now lands
+    — correct. The DB column-name carryover (L1) is now undocumented;
+    consider a one-line note like
+    `// On-chain field is price_usdc_base_units; DB column rename
+    deferred to avoid a migration in this PR.` Cosmetic.
+  - **I3. PR title says "Task #37"; live TaskList has Task #35 =
+    "Rename price_lamports → price_usdc_base_units in registry
+    program + IDL".** Same task-number drift as PRs #65 / #67 / #69.
+    Cosmetic.
+  - **I4. Devnet upgrade-in-place ordering.** This rename does not
+    break wire compatibility either way (on-chain Borsh layout
+    unchanged, JS decoder field name is purely IDL-driven). However:
+    SDK consumers that *re-export* the IDL will get the new field
+    names; any out-of-tree consumer pinned to the prior IDL must
+    rebuild. Tracked under Task #38 (devnet upgrade-in-place).
+
+### Sanity-check answers
+
+1. ✅ **No new admin keys / withdrawal authorities.** Pure rename.
+2. ✅ **No fund-flow surface change.** No accounts, no signers,
+   no token::transfer paths touched.
+3. ✅ **No Borsh layout drift.** Field is `u64` at the same position
+   before and after; Borsh deserializes by position.
+4. ✅ **No discriminator drift.** Account discriminator
+   (`ServiceListing`) and instruction discriminator
+   (`register_service`) are name-keyed but unchanged.
+5. ✅ **No prior fix regressed.** PR #65 (registry `emit_cpi!`),
+   PR #67 (escrow `emit_cpi!`), PR #69 (USDC mint pin) all visible
+   in the regenerated IDL — preserved unchanged.
+6. ✅ **CI green at review time.**
+
+### Verdict
+
+✅ **APPROVE for merge.**
+
+Mechanical rename across the stack with zero semantic surface change.
+No security implications, no fund-flow risk, no Borsh layout drift, no
+discriminator drift. Closes PR #2 M2 finding cleanly. The DB column
+rename deferral (L1) is sensible and explicitly bundles into a future
+maintenance window.
+
+Carryforwards (non-blocking):
+- **L1**: bundle `price_lamports` → `price_usdc_base_units` Postgres
+  column rename + Drizzle migration into a future indexer release.
+- **L2 / I2**: cosmetic test-description / schema-comment cleanup
+  alongside L1.
+- **I1**: Task #41 (indexer revert) author must verify any
+  hot-fix decoder paths use `priceUsdcBaseUnits`.
+- **I3**: PR title task-number drift; harmless.
+- **I4**: out-of-tree IDL consumers rebuild required (already
+  expected as part of Task #38 devnet upgrade-in-place).
+
