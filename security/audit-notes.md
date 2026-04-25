@@ -381,3 +381,116 @@ drift when it happens. No action needed on PR #12.
 **Release gate:** cleared. `@agentbazaar/idl` is safe to publish to
 npm from a security standpoint (modulo the usual `npm publish`
 hygiene — 2FA, provenance, no leaked `.env`).
+
+---
+
+## PR #15 — feature/sdk-skeleton — 2026-04-24 (light audit)
+**Verdict:** APPROVED.
+
+Pure scaffolding PR — no on-chain code, no escrow, no key handling, no
+admin surface. All eight public methods are stubs that throw
+`NotImplementedError`. Light audit per sdk-eng's request.
+
+**Scope walked:**
+- `packages/sdk/src/client.ts` (+104) — `AgentBazaar` class shell
+- `packages/sdk/src/errors.ts` (+36) — error hierarchy
+- `packages/sdk/src/types.ts` (+109) — input/result interfaces
+- `packages/sdk/src/index.ts` (+23) — public surface re-exports
+- `packages/sdk/package.json` (+49) — deps, exports, publishConfig
+- `packages/sdk/tsup.config.ts` (+10) — dual ESM/CJS + `.d.ts` build
+- `packages/sdk/tests/client.test.ts` (+72) — 13 unit tests
+- `pnpm-lock.yaml` (+605) — new transitive closure
+
+**Findings:** none at any severity.
+
+**Five focus-area answers (sdk-eng's list):**
+
+1. ✅ **Public surface is clean.** `src/index.ts` re-exports only the
+   `AgentBazaar` class, the two config types (`AgentBazaarConfig`,
+   `AnchorWallet`), seven error classes, and the ten input/result
+   interfaces from `types.ts`. No RPC keys, secrets, env reads,
+   or internal helpers escape. `package.json` `files: ["dist"]`
+   ships only the built artifacts — source tree stays private.
+   `publishConfig.access: public` is correct for a published
+   `@agentbazaar/sdk`.
+
+2. ✅ **New deps clean.**
+   - `@solana/web3.js` at `^1.95.0` → lockfile resolves to
+     **1.98.4** (current stable 1.x line).
+   - `tsup` at `^8.5.1` → lockfile resolves to **8.5.1**
+     (build-time only, devDependency).
+   - `@coral-xyz/anchor 0.31.1` matches the version used by
+     `packages/idl` and `programs/` — no duplicate Anchor runtime.
+   - `@coral-xyz/anchor` and `@solana/web3.js` also declared as
+     `peerDependencies` — good practice; avoids dual instances
+     when the consumer pins its own version.
+   - `zod ^3.23.8` → resolves to `3.25.76`, comfortably post-CVE-2023-4316
+     (inherited from `packages/idl`'s audit).
+   - No new runtime deps beyond the four above; transitive closure
+     is the standard web3.js/anchor/tsup trees.
+
+3. ✅ **`AnchorWallet` interface is structural, not nominal.**
+   Defines `publicKey`, `signTransaction`, `signAllTransactions` as
+   a plain TS interface — any wallet-adapter, `NodeWallet`, or custom
+   signer matches duck-typed. No `instanceof NodeWallet` gate, no
+   prototype-chain dependency, no concrete class import. This is
+   the right shape — consumers are not forced to bring in Anchor's
+   `NodeWallet` (which pulls `fs` / keypair-file loading).
+
+4. ✅ **Error hierarchy — `new.target.name` is safe.**
+   `new.target` is an ES2015 meta-property that returns the
+   constructor function used with `new`; `.name` is the static
+   function name defined at class-declaration time. It is NOT
+   runtime-evaluated user input, so there is no injection vector.
+   The pattern is the standard way to avoid `this.name` ending up
+   as `"Error"` after minification or subclassing. Subclasses
+   correctly rely on `new.target.name` from the base (checked —
+   no subclass re-declares `name`). `TransactionFailedError` adds
+   a public `signature?: string` field — signatures are public by
+   definition; safe to expose.
+
+5. ✅ **tsup build + no install-time scripts.**
+   `tsup` emits to `dist/` which is `.gitignore`'d at the repo root
+   (confirmed). `package.json` `scripts`: `build`, `dev`, `test`,
+   `typecheck`, `lint` — none run at `npm install` (no
+   `preinstall` / `install` / `postinstall` / `prepublish`). Build
+   runs via `tsup` which uses esbuild; no custom plugins that
+   execute during the publish pipeline. `tsup.config.ts` uses only
+   documented options (`entry`, `format`, `dts`, `clean`,
+   `sourcemap`, `treeshake`) — nothing suspicious.
+
+**Additional observations (informational):**
+
+- **O1.** Constructor accepts `rpc: string | Connection`. Untrusted
+  strings would construct a `Connection` against an attacker chosen
+  endpoint. This is standard "trust your config" territory — expected
+  design for any Solana client library. Not a finding; noted so that
+  dashboard / backend wrappers downstream are aware that the RPC URL
+  flows through here unvalidated.
+- **O2.** `Connection(rpc, 'confirmed')` hard-codes the commitment
+  level. For the MVP this is fine; when the SDK fleshes out,
+  consider surfacing a `commitment` option in `AgentBazaarConfig`
+  so consumers can opt into `'finalized'` for high-value flows
+  (e.g. escrow release) while keeping `'confirmed'` for discovery.
+  Not a security issue, just a note for the impl phase.
+- **O3.** Tests cover constructor shapes, stub throws, and error
+  subclass `instanceof` chain. Good breadth for a skeleton. When
+  implementations land, the test plan should grow to cover the
+  actual tx-building logic — flag for qa-test-eng in M1.
+- **O4.** The `@agentbazaar/idl` dep is `workspace:*` — correct
+  for monorepo linking and will be pinned to a concrete version
+  at publish time via pnpm. No action.
+- **O5.** `tests/client.test.ts` constructs `new Connection(TEST_RPC)`
+  with `https://api.devnet.solana.com` as the URL. The constructor
+  doesn't actually open a socket (it's lazy); unit tests stay
+  hermetic. Confirmed no `.request` / `.getLatestBlockhash` etc.
+  during tests. Good.
+
+**Template for implementation-phase audits (M0 → M1):** when the
+stubs get filled in, each method body will need its own walk —
+especially `register` (Pinata upload + capability-hash derivation +
+register_service CPI), `hire` (escrow create + USDC transfer), and
+`confirm` / `claimTimeout` / `dispute` (escrow release paths). Those
+will be the substantive audits; this one establishes the perimeter.
+
+No blocker. Cleared to merge.
