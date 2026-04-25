@@ -1196,3 +1196,161 @@ audits — `hire`, `confirm`, `claimTimeout`, `dispute` each need
 their own walk when impls land. L6/L7 tracked on backend-eng
 (M1 indexer) and sdk-eng (Task #10) sides. O8 is the only
 residual finding from this re-review.
+
+---
+
+## PR #22 — feature/backend-indexer-skeleton — 2026-04-25 (light audit)
+**Verdict:** APPROVED with two Medium and one Low non-blocking
+finding plus three informational notes. Pure scaffolding PR — no
+business logic, no signed input, no funds movement. SSRF / request
+validation surface lands in Task #12 (Helius webhook receiver).
+The Mediums are correctness/testability issues that compound when
+business logic arrives in Tasks #11–#14; worth fixing before the
+next substantive PR.
+
+**Scope walked:**
+- `apps/indexer/src/index.ts` (+19) — entrypoint, dotenv + Hono server
+- `apps/indexer/src/logger.ts` (+8) — pino transport selection
+- `apps/indexer/drizzle.config.ts` (+10) — drizzle-kit config
+- `apps/indexer/package.json` (+33) — deps and scripts
+- `apps/indexer/tests/sanity.test.ts` (+16) — placeholder webhook test
+- `apps/indexer/tsconfig.json` / `tsconfig.build.json` / `vitest.config.ts`
+- `pnpm-lock.yaml` (+1859 / -12)
+
+**Findings:**
+
+- **Critical:** none.
+- **High:** none.
+
+- **Medium:**
+
+  - **M1. dotenv-mono import ordering broken under ESM.** In
+    `src/index.ts`:
+    ```ts
+    import { dotenvLoad } from 'dotenv-mono';
+    dotenvLoad();
+    import { serve } from '@hono/node-server';
+    import { Hono } from 'hono';
+    import { logger } from './logger.js';
+    ```
+    The app is ESM (`"type": "module"` + `"module": "NodeNext"`).
+    All `import` statements are hoisted above any executable
+    body code. Actual evaluation order:
+    1. `dotenv-mono` module loads.
+    2. `@hono/node-server` loads.
+    3. `hono` loads.
+    4. `./logger.js` loads — and `logger.ts` reads
+       `process.env['NODE_ENV']` at module-init time, **before
+       `dotenvLoad()` has run**.
+    5. Body of `index.ts` runs: `dotenvLoad()` finally executes.
+    6. `serve(...)` reads `process.env['PORT']` (works because
+       PORT is read in body code).
+
+    Consequence: any `process.env` value that lives in `.env`
+    (e.g., `NODE_ENV`, future `DATABASE_URL`,
+    `HELIUS_WEBHOOK_SECRET`) is **not visible** to any module
+    that reads it at top-level. Production deploys are unaffected
+    (Railway/docker set env vars in the process directly). Local
+    dev is the affected surface.
+
+    **Fix:** use the `dotenv-mono/preload` side-effect import:
+    ```ts
+    import 'dotenv-mono/preload';   // side-effect import — runs at module-load
+    import { serve } from '@hono/node-server';
+    // ...
+    ```
+    Or `node --import dotenv-mono/preload`, or Node 20.6+'s
+    `--env-file=.env`. Trivial fix; catches a class of latent
+    bugs that surface as soon as Tasks #11/#12 add env-driven
+    behaviour.
+
+  - **M2. Module-load side effect — importing `src/index.ts`
+    starts the HTTP server.** `serve({ fetch: app.fetch, port }, ...)`
+    is at module top-level. The sanity test does
+    `import { app } from '../src/index.js'`, which runs the
+    entire module body — including `serve(...)` — just to get
+    the Hono app reference. Three consequences:
+    1. **Test pollution.** Every Vitest run starts a real HTTP
+       listener on port 3001 (or `PORT`). Currently silent
+       because the test uses `app.fetch(req)` directly, not the
+       socket. But Vitest doesn't await server shutdown.
+    2. **CI / parallel-test risk.** Future tests importing
+       `src/index.ts` would compete for the same port.
+    3. **Consumer testability.** Future tests wanting to
+       exercise individual routes via `app.fetch()` must accept
+       the side effect of starting the server.
+
+    **Fix:** split entrypoint and app:
+    ```ts
+    // src/app.ts
+    import { Hono } from 'hono';
+    export const app = new Hono();
+    app.post('/webhooks/helius', (c) => c.json({ ok: true }));
+
+    // src/index.ts (entrypoint)
+    import 'dotenv-mono/preload';
+    import { serve } from '@hono/node-server';
+    import { app } from './app.js';
+    import { logger } from './logger.js';
+    const port = Number(process.env['PORT'] ?? 3001);
+    serve({ fetch: app.fetch, port }, () => logger.info({ port }, 'indexer listening'));
+    ```
+    Tests import `app.ts`; no server starts. Standard Hono
+    pattern. Fold into the M1 fix.
+
+- **Low:**
+
+  - **L1. `drizzle.config.ts` uses `!` non-null assertion on
+    `DATABASE_URL`.**
+    ```ts
+    url: process.env['DATABASE_URL']!,
+    ```
+    If `DATABASE_URL` isn't set when `pnpm db:generate` /
+    `db:migrate` runs, drizzle-kit receives `undefined` and
+    fails with a confusing error. Not a security issue —
+    drizzle-kit is a build-time tool — but a DX gap that
+    becomes more painful when Tasks #11/#13 land migrations
+    developers run frequently. **Fix:**
+    ```ts
+    const url = process.env['DATABASE_URL'];
+    if (!url) throw new Error('DATABASE_URL is required for drizzle-kit operations');
+    ```
+    Pairs naturally with O1 below.
+
+**Three informational notes (not findings):**
+
+- **O1.** No central env-var schema. `process.env` is read
+  ad-hoc across `index.ts`, `logger.ts`, and
+  `drizzle.config.ts`. Recommend a `src/env.ts` that Zod-parses
+  `{ NODE_ENV, PORT, DATABASE_URL, HELIUS_API_KEY, HELIUS_WEBHOOK_SECRET }`
+  at startup and exports a typed object. Closes the gap before
+  Task #12 lands the webhook secret. Pairs with M1.
+- **O2.** `pino-pretty` is in `dependencies`, not
+  `devDependencies`. Required because pino's transport
+  mechanism dynamically loads it at runtime in non-production.
+  Acceptable trade-off.
+- **O3.** `serve(...)` defaults to `0.0.0.0` binding (all
+  interfaces). Correct for Railway / docker.
+
+**Cross-cutting carryover (informational):** PR #19's L6 (RPC
+fallback needs server-side `memcmp` filtering) lands here when
+**Task #11** wires the Drizzle schema and **Task #13** wires the
+event-handler upsert. Indexed columns on `(capability_hash)` and
+`(owner)` will be the primary lookup paths the SDK falls through
+to via the API.
+
+**Mainnet release-gate verdict:** N/A — pure scaffold. Each of
+Tasks #11–#14 will need its own audit walk when business logic
+lands. **M1+M2 should land before Task #11** to avoid layering
+business logic on broken bootstrap.
+
+**Recommended fix order:**
+1. **Before Task #11:** M1 (`dotenv-mono/preload`) + M2 (split
+   `app.ts` from `index.ts`). Both tiny.
+2. **Soon:** L1 + O1 (one `src/env.ts` module covers both).
+3. **Nice-to-have:** O2 / O3 — status quo, no action.
+
+None of these block PR #22's merge — scaffold is syntactically
+correct, test passes by accident (server-side-effect masked by
+in-process `app.fetch`). Worth fixing before the next PR layers
+business logic on top.
