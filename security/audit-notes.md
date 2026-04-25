@@ -2589,3 +2589,121 @@ schema-validated, every fetch has a four-layer SSRF defense. The
 indexer is production-ready from the security side.
 
 **Backend-eng's M0 scope: DONE. Cleared for production.**
+
+---
+
+## PR #47 — feature/qa-e2e-register-discover — 2026-04-25 (light audit)
+
+**Verdict:** APPROVED, no findings; three informational notes.
+**This is the final M0 task** (Task #18). After PR #47 merges, M0
+is closed from the security side.
+
+Test-only PR — `register → discover` happy path against devnet.
+Two files:
+- `tests/e2e/register-discover.test.ts` (+123 / -5) — 4-step Vitest suite
+- `tests/fixtures/wallets.ts` (+87 / -12) — payer-funded wallet helper
+
+**qa-test-eng's three claims, all verified:**
+
+1. ✅ **CLI payer keypair only used for funding test wallets.**
+   `loadCliPayer()` reads `~/.config/solana/id.json` at runtime,
+   passes the Keypair to `createFundedWallets` as the funding
+   source. Never persisted, never logged, never sent over the
+   wire — only its derived signature lands in `tx.sign(payer) +
+   sendRawTransaction`. Falls back to `undefined` gracefully on
+   missing file. Standard pattern.
+
+2. ✅ **`discoveryApiUrl: 'http://localhost:9999'` forces RPC
+   fallback.** Localhost:9999 fails ECONNREFUSED → `DiscoveryAPIError`
+   → fallback fires. No real HTTP traffic. Note: the SDK's
+   `discover.ts` doesn't have a private-IP block (that was
+   indexer-side `fetch-metadata.ts`), so the SDK happily attempts
+   the connect; the OS-level refusal is the actual gate. Works as
+   intended for the test, doesn't compromise the SDK's threat
+   model.
+
+3. ✅ **`AIRDROP_SOL = 0.1` avoids draining the payer.** Per-run
+   cost is 0.1 SOL + tx fees. 100 runs ≈ 10 SOL total — manageable
+   for a developer's devnet payer, especially since `payer ?? faucet`
+   means the faucet covers the case when no CLI keypair exists.
+
+**Three sanity-check answers (analogous to PR #38 checklist):**
+
+1. ✅ **No hardcoded secrets.**
+   - `pinataJwt = process.env.PINATA_JWT ?? ''` — env-only.
+   - CLI keypair loaded from `~/.config/solana/id.json` at runtime.
+   - Test wallets ephemeral via `Keypair.generate()`.
+   - No `.env` files committed.
+2. ✅ **No mainnet references.**
+   - Default RPC: `'https://api.devnet.solana.com'`.
+   - `PUBLIC_DEVNET_URL = 'https://api.devnet.solana.com'`.
+   - `connection.requestAirdrop` is devnet/testnet-only.
+   - `REGISTRY_PROGRAM_ID` (via `deriveListingPda` from
+     PR #38 helpers) is the devnet program ID.
+   - Test header explicitly: "Hits devnet directly".
+3. ✅ **No admin-key footprint.**
+   - CLI payer is the developer's opt-in identity; explicit
+     `E2E=true` flag required.
+   - Ephemeral test wallets via `Keypair.generate()`.
+   - No upgrade-authority pattern, no Squads stubs.
+
+**Three informational notes (not findings, not blocking):**
+
+- **I1.** **CLI payer is the developer's actual on-chain identity
+  (devnet).** Every test run is publicly tied to the payer's
+  pubkey on Solana Explorer. Devnet has no real value so the
+  association is purely metadata, but worth flagging for CI
+  setups: a CI environment should use a dedicated CI keypair
+  rather than reusing a developer's personal one. Operational,
+  not security.
+- **I2.** **Permanent listings accumulate on devnet** because
+  `deactivate()` isn't implemented in M0 (throws
+  `NotImplementedError`). The afterAll block correctly documents
+  this:
+  > Task #18 follow-up: add cleanup once deactivate_service is wired in the SDK.
+
+  Each test run leaves one permanent listing with a unique
+  `e2e-capability-${Date.now()}` capability. Operational only;
+  benign on devnet.
+- **I3.** **`pinataJwt` empty-string fallback could fail more
+  loudly.** `pinataJwt = process.env.PINATA_JWT ?? ''` — if unset,
+  the test progresses to `register()` and fails when Pinata returns
+  401. A pre-flight assertion would give a clearer error:
+  ```ts
+  if (isE2E && !pinataJwt) throw new Error('PINATA_JWT required for E2E test');
+  ```
+  DX, not security.
+
+**Why this audit is painless:**
+- Test-only diff; no production code touched.
+- All keypairs ephemeral; no signed flows except per-test-run
+  transactions on devnet.
+- Discovery API path forced to fail-and-fallback; no real
+  network traffic to a non-test endpoint.
+- Anchor's `Wallet` class is used (not a hand-rolled adapter) —
+  correct signing behavior inherited.
+
+**Mainnet release-gate verdict:** N/A — test scaffolding never
+ships to production. Cleared to merge.
+
+**M0 trajectory after PR #47 merge: 19/19 done → M0 CLOSED from
+the security side.**
+
+The pattern that played out across M0:
+- Inbound HTTP boundaries hardened (PR #17 register, PR #19/#21
+  discover, PR #32/#35 webhook auth).
+- Outbound HTTP boundaries hardened (PR #40/#44 fetchMetadata).
+- On-chain trust boundaries documented (PR #2 registry program,
+  with M2 IDL rename tracked for M1).
+- Test infrastructure stays clean (PR #38, PR #47).
+
+**Pre-mainnet polish list (carryforward, not blocking M0 closure):**
+- L2 retention TTL on `processed_signatures` (PR #35)
+- L2 decoder runtime Zod (PR #40)
+- I1 streaming response cap, I2 fetch-metadata unit tests, I3
+  safeLogError helper (PR #44)
+- M2 from PR #2 (`price_lamports` rename) — anchor-eng's M1 IDL pass
+
+The substantive on-chain work (escrow, SLA enforcement, evaluator
+program) is M1+ scope. M0 has established the discipline
+patterns; M1 will exercise them against actual fund movement.
