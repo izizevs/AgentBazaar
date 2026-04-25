@@ -32,9 +32,11 @@
     "@agentbazaar/idl": "workspace:*",
     "@coral-xyz/anchor": "0.31.1",
     "@solana/web3.js": "^1.95.0",
+    "bn.js": "^5.2.1",
     "zod": "^3.23.8"
   },
   "devDependencies": {
+    "@types/bn.js": "^5.1.6",
     "tsup": "^8.5.1",
     "typescript": "5.4.3",
     "vitest": "^2.0.0"

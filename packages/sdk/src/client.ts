@@ -5,6 +5,7 @@ import {
   type VersionedTransaction,
 } from '@solana/web3.js';
 import { NotImplementedError } from './errors.js';
+import { registerService } from './register.js';
 import type {
   ConfirmInput,
   DeliverInput,
@@ -32,24 +33,38 @@ export interface AgentBazaarConfig {
   wallet: AnchorWallet;
   /** Solana RPC endpoint URL or an existing Connection instance. */
   rpc: string | Connection;
+  /** Pinata JWT for IPFS metadata uploads (required for register()). */
+  pinataJwt?: string;
 }
 
 export class AgentBazaar {
   readonly connection: Connection;
   readonly wallet: AnchorWallet;
+  // Private: prevents accidental exposure via JSON.stringify(client) or error-capture tooling.
+  readonly #pinataJwt: string | undefined;
 
-  constructor({ wallet, rpc }: AgentBazaarConfig) {
+  constructor({ wallet, rpc, pinataJwt }: AgentBazaarConfig) {
     this.wallet = wallet;
     this.connection = typeof rpc === 'string' ? new Connection(rpc, 'confirmed') : rpc;
+    this.#pinataJwt = pinataJwt;
   }
 
   /**
    * Register this agent as a service provider on-chain.
-   * Uploads metadata to IPFS, derives the capability_hash, and calls
-   * bazaar-registry::register_service.
+   *
+   * Validates input via MetadataSchema, uploads metadata to Pinata/IPFS,
+   * derives the capability_hash, checks for a duplicate active listing,
+   * and calls bazaar-registry::register_service with 3-attempt retry and
+   * priority fee escalation.
+   *
+   * @throws {ValidationError} if input fails MetadataSchema validation
+   * @throws {MetadataUploadError} if the Pinata upload fails
+   * @throws {DuplicateListingError} if an active listing already exists for this capability
+   * @throws {TransactionFailedError} if the transaction fails after all retry attempts
    */
-  async register(_input: RegisterInput): Promise<RegisterResult> {
-    throw new NotImplementedError('register');
+  async register(input: RegisterInput): Promise<RegisterResult> {
+    if (!this.#pinataJwt) throw new NotImplementedError('register (pinataJwt not configured)');
+    return registerService(this.connection, this.wallet, input, this.#pinataJwt);
   }
 
   /**
@@ -100,5 +115,9 @@ export class AgentBazaar {
    */
   async requestEvaluation(_escrowId: string): Promise<string> {
     throw new NotImplementedError('requestEvaluation');
+  }
+
+  toJSON() {
+    return { wallet: { publicKey: this.wallet.publicKey.toBase58() } };
   }
 }

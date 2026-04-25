@@ -38,6 +38,8 @@ describe('AgentBazaar stubs', () => {
   const cases: Array<() => Promise<unknown>> = [
     () =>
       client.register({
+        name: 'test',
+        description: 'test agent',
         capability: 'cap',
         priceUsdc: 1_000_000n,
         pricingModel: 'per_request',

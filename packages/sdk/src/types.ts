@@ -13,6 +13,10 @@ export interface SlaParams {
 // ─── register() ─────────────────────────────────────────────────────────────
 
 export interface RegisterInput {
+  /** Human-readable service name (1–64 chars). */
+  name: string;
+  /** Service description (≤500 chars). */
+  description: string;
   /** Human-readable capability identifier; SHA-256 becomes the on-chain capability_hash. */
   capability: string;
   /** Service price in USDC micro-units (6 decimals). */
@@ -21,8 +25,12 @@ export interface RegisterInput {
   pricingModel: 'per_request' | 'per_job' | 'hourly' | 'subscription';
   /** SLA parameters stored on-chain. */
   sla: SlaParams;
-  /** Publicly reachable endpoint URL for this agent. */
+  /** Publicly reachable endpoint URL for this agent (HTTPS only). */
   endpoint: string;
+  /** Optional agent avatar URL (HTTPS only). */
+  avatar?: string;
+  /** Arbitrary extension key/value pairs stored in metadata. */
+  custom?: Record<string, unknown>;
   /** Optional SATI agent ID (0 = unregistered). */
   satiAgentId?: bigint;
 }

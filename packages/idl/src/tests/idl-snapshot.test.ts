@@ -36,6 +36,7 @@ describe('MetadataSchema', () => {
       name: 'my-agent',
       description: 'Does stuff',
       capability: 'text-summarisation-v1',
+      endpoint: 'https://agent.example.com',
     });
     expect(result.success).toBe(true);
   });
@@ -45,10 +46,27 @@ describe('MetadataSchema', () => {
       name: 'agent',
       description: 'x',
       capability: 'cap',
+      endpoint: 'https://agent.example.com',
       avatar: 'https://example.com/avatar.png',
       custom: { tier: 'pro', region: 'us-east' },
     });
     expect(result.success).toBe(true);
+  });
+
+  it('rejects non-https endpoint', () => {
+    for (const endpoint of [
+      'http://agent.example.com',
+      'javascript:alert(1)',
+      'ftp://files.example.com',
+    ]) {
+      const result = MetadataSchema.safeParse({
+        name: 'agent',
+        description: 'x',
+        capability: 'cap',
+        endpoint,
+      });
+      expect(result.success, `expected ${endpoint} to be rejected`).toBe(false);
+    }
   });
 
   it('rejects empty name', () => {
@@ -56,6 +74,7 @@ describe('MetadataSchema', () => {
       name: '',
       description: 'ok',
       capability: 'cap',
+      endpoint: 'https://agent.example.com',
     });
     expect(result.success).toBe(false);
   });
@@ -65,6 +84,7 @@ describe('MetadataSchema', () => {
       name: 'a'.repeat(65),
       description: 'ok',
       capability: 'cap',
+      endpoint: 'https://agent.example.com',
     });
     expect(result.success).toBe(false);
   });
@@ -74,6 +94,7 @@ describe('MetadataSchema', () => {
       name: 'agent',
       description: 'x'.repeat(501),
       capability: 'cap',
+      endpoint: 'https://agent.example.com',
     });
     expect(result.success).toBe(false);
   });
@@ -83,6 +104,7 @@ describe('MetadataSchema', () => {
       name: 'agent',
       description: 'ok',
       capability: 'x'.repeat(257),
+      endpoint: 'https://agent.example.com',
     });
     expect(result.success).toBe(false);
   });
@@ -92,6 +114,7 @@ describe('MetadataSchema', () => {
       name: 'agent',
       description: 'ok',
       capability: 'cap',
+      endpoint: 'https://agent.example.com',
       avatar: 'not-a-url',
     });
     expect(result.success).toBe(false);
@@ -107,6 +130,7 @@ describe('MetadataSchema', () => {
         name: 'agent',
         description: 'ok',
         capability: 'cap',
+        endpoint: 'https://agent.example.com',
         avatar,
       });
       expect(result.success, `expected ${avatar} to be rejected`).toBe(false);
@@ -119,6 +143,7 @@ describe('MetadataSchema', () => {
       name: 'agent',
       description: 'ok',
       capability: 'cap',
+      endpoint: 'https://agent.example.com',
       // biome-ignore lint/suspicious/noExplicitAny: intentional pollution probe
       custom: { __proto__: { polluted: true } } as any,
     });

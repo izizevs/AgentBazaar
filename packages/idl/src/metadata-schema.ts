@@ -15,6 +15,12 @@ export const MetadataSchema = z.object({
    * capability_hash stored in ServiceListing.
    */
   capability: z.string().min(1).max(256),
+  /** Publicly reachable endpoint URL for this agent (HTTPS only, ≤256 chars). */
+  endpoint: z
+    .string()
+    .url()
+    .max(256)
+    .refine((u) => u.startsWith('https://'), 'Endpoint must use HTTPS'),
   /** Optional agent avatar URL (HTTPS only). */
   avatar: z
     .string()
