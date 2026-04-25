@@ -1,0 +1,109 @@
+import type { PublicKey } from '@solana/web3.js';
+
+// ─── SLA ────────────────────────────────────────────────────────────────────
+
+export interface SlaParams {
+  maxLatencyMs?: number;
+  minUptimePct?: number;
+  responseFormat?: string;
+  jsonSchemaUri?: string;
+  customParams?: Array<{ key: string; value: string }>;
+}
+
+// ─── register() ─────────────────────────────────────────────────────────────
+
+export interface RegisterInput {
+  /** Human-readable capability identifier; SHA-256 becomes the on-chain capability_hash. */
+  capability: string;
+  /** Service price in USDC micro-units (6 decimals). */
+  priceUsdc: bigint;
+  /** Pricing model. */
+  pricingModel: 'per_request' | 'per_job' | 'hourly' | 'subscription';
+  /** SLA parameters stored on-chain. */
+  sla: SlaParams;
+  /** Publicly reachable endpoint URL for this agent. */
+  endpoint: string;
+  /** Optional SATI agent ID (0 = unregistered). */
+  satiAgentId?: bigint;
+}
+
+export interface RegisterResult {
+  /** The ServiceListing PDA address. */
+  listing: PublicKey;
+  /** Transaction signature. */
+  signature: string;
+}
+
+// ─── discover() ─────────────────────────────────────────────────────────────
+
+export interface DiscoverInput {
+  /** Filter by capability identifier (exact match). */
+  capability?: string;
+  /** Minimum reputation score (0–100). */
+  minReputation?: number;
+  /** Maximum price in USDC micro-units. */
+  maxPrice?: bigint;
+  /** Maximum SLA latency in milliseconds. */
+  maxLatency?: number;
+  /** Sort field. Defaults to 'reputation'. */
+  sort?: 'price' | 'reputation' | 'latency';
+}
+
+export interface ServiceProvider {
+  listing: PublicKey;
+  owner: PublicKey;
+  capability: string;
+  priceUsdc: bigint;
+  pricingModel: number;
+  sla: SlaParams;
+  endpoint: string;
+  reputation: number;
+  jobsCompleted: number;
+  isActive: boolean;
+}
+
+// ─── hire() ─────────────────────────────────────────────────────────────────
+
+export interface HireInput {
+  /** Budget for this job in USDC micro-units. */
+  budget: bigint;
+  /** SLA terms agreed for this job. */
+  sla: SlaParams;
+  /** Job timeout in seconds. */
+  timeout: number;
+}
+
+export interface Job {
+  escrowId: PublicKey;
+  agentId: PublicKey;
+  budget: bigint;
+  status: 'pending' | 'active' | 'completed' | 'disputed' | 'timed_out';
+  signature: string;
+}
+
+// ─── deliver() ──────────────────────────────────────────────────────────────
+
+export interface DeliverInput {
+  /** URI pointing to the job result (e.g., IPFS/Arweave). */
+  resultUri: string;
+  /** SHA-256 hash of the result payload (32 bytes). */
+  resultHash: Uint8Array;
+}
+
+// ─── confirm() ──────────────────────────────────────────────────────────────
+
+export interface ConfirmInput {
+  /** Reputation score awarded (0–100). */
+  score: number;
+  /** Optional tags describing outcome quality. */
+  tags?: string[];
+}
+
+// ─── dispute() ──────────────────────────────────────────────────────────────
+
+export interface DisputeInput {
+  /** Human-readable reason for the dispute. */
+  reason: string;
+  /** URI pointing to dispute evidence. */
+  evidenceUri?: string;
+}

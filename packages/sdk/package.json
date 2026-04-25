@@ -1,0 +1,49 @@
+{
+  "name": "@agentbazaar/sdk",
+  "version": "0.1.0",
+  "description": "TypeScript SDK for the AgentBazaar on-chain agent marketplace.",
+  "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      },
+      "require": {
+        "types": "./dist/index.d.cts",
+        "default": "./dist/index.cjs"
+      }
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "lint": "biome check src tests"
+  },
+  "dependencies": {
+    "@agentbazaar/idl": "workspace:*",
+    "@coral-xyz/anchor": "0.31.1",
+    "@solana/web3.js": "^1.95.0",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "tsup": "^8.5.1",
+    "typescript": "5.4.3",
+    "vitest": "^2.0.0"
+  },
+  "peerDependencies": {
+    "@coral-xyz/anchor": "0.31.1",
+    "@solana/web3.js": "^1.95.0"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}
