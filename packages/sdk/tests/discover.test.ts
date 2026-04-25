@@ -537,6 +537,6 @@ describe('AgentBazaar.discover() — client integration', () => {
 
     const results = await client.discover({ capability: 'text-summarise' });
     expect(results).toHaveLength(1);
-    expect(results[0]!.endpoint).toBe(provider.endpoint);
+    expect(results[0]?.endpoint).toBe(provider.endpoint);
   });
 });

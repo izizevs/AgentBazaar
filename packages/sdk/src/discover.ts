@@ -104,7 +104,7 @@ async function fetchFromAPI(
   }
 
   if (!res.ok) {
-    throw new DiscoveryAPIError(`Discovery API error: ${res.status} ${res.statusText}`);
+    throw new DiscoveryAPIError(`Discovery API error: ${res.status} ${res.statusText}`, res.status);
   }
 
   // M1: Zod-validate response; L2: json() SyntaxError → DiscoveryAPIError → triggers RPC fallback

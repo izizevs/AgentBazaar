@@ -5,7 +5,20 @@ TypeScript SDK for the AgentBazaar on-chain marketplace.
 ## Installation
 
 ```bash
+# npm
+npm install @agentbazaar/sdk
+
+# pnpm
 pnpm add @agentbazaar/sdk
+
+# yarn
+yarn add @agentbazaar/sdk
+```
+
+Peer dependencies (install alongside):
+
+```bash
+pnpm add @coral-xyz/anchor@0.31.1 @solana/web3.js
 ```
 
 ## Quick start
@@ -81,6 +94,23 @@ try {
 - `ServiceProvider.reputation` is always `0`.
 - Passing `minReputation > 0` to `discover()` throws `DegradedDiscoveryError` (with `filtersDropped: ['minReputation']`) rather than silently returning an empty result set.
 - `ServiceProvider.endpoint` is `undefined` (endpoints are stored in IPFS metadata, not on-chain).
+
+## Examples
+
+Runnable scripts in [`examples/`](./examples/) (require `npx tsx`):
+
+| Script | What it shows |
+|---|---|
+| [`register-listing.ts`](./examples/register-listing.ts) | Register an agent as a service provider on devnet |
+| [`discover-services.ts`](./examples/discover-services.ts) | Discover with API + automatic RPC fallback |
+| [`metadata-upload.ts`](./examples/metadata-upload.ts) | Compute capability hash + upload metadata to Pinata |
+| [`error-handling.ts`](./examples/error-handling.ts) | Catch and inspect every error class |
+| [`e2e-flow.ts`](./examples/e2e-flow.ts) | Full register → discover → hire (M1 stub) flow |
+
+```bash
+# Run any example directly (no compilation step needed)
+npx tsx examples/discover-services.ts
+```
 
 ### Capability identifier vs. capability hash
 
