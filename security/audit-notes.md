@@ -1571,3 +1571,274 @@ integration test) will need its own audit walk when business logic
 lands on this corrected scaffold.
 
 Cleared to merge. Tight, correct fixes; no scope creep.
+
+---
+
+## PR #30 — feature/sdk-examples-and-publish — 2026-04-25 (light audit)
+**Verdict:** APPROVED. No findings; metadata-and-docs PR. Tarball
+contents verified; no secrets / source / test-fixtures escape the
+npm package boundary.
+
+**Scope walked:**
+- `packages/sdk/package.json` (+17 / -1) — license, repository,
+  keywords, `files: ["dist", "README.md"]`, deps
+- `packages/sdk/README.md` (+30) — install / quick-start / docs
+- `packages/sdk/examples/*.ts` (5 new files, +550 total) —
+  documentation-only; not shipped via npm
+- `packages/sdk/src/discover.ts` / `tests/discover.test.ts` (1 line each)
+  — minor docstring/test polish
+
+**Tarball verification (sdk-eng's dry-run output, 8 files / 33.3 kB):**
+
+| file | size | OK? |
+|---|---|---|
+| README.md | 3.3 kB | ✅ |
+| dist/index.cjs | 17.6 kB | ✅ |
+| dist/index.cjs.map | 43.4 kB | ✅ source map (see note O1) |
+| dist/index.d.cts | 10.3 kB | ✅ |
+| dist/index.d.ts | 10.3 kB | ✅ |
+| dist/index.js | 16.9 kB | ✅ |
+| dist/index.js.map | 43.2 kB | ✅ source map (see note O1) |
+| package.json | 1.4 kB | ✅ |
+
+**Excluded by `files: ["dist", "README.md"]`:** `src/`, `tests/`,
+`examples/`, `tsconfig.json`, `vitest.config.ts`, `.env`, any local
+keypair files. Clean — every category that could carry secrets or
+internals stays out.
+
+**Five focus-area answers (sdk-eng's checklist):**
+
+1. ✅ **No secret leaks in tarball.** Examples reference
+   `process.env.PINATA_JWT` and `process.env.KEYPAIR_PATH` — never
+   commit secret values to source. Examples are excluded from the
+   tarball anyway.
+2. ✅ **README accuracy.** Install commands map to the published
+   package name (`@agentbazaar/sdk`); peer-dep instruction matches
+   `package.json` peer-deps; quick-start code matches the actual
+   exported `AgentBazaar` API and the post-PR-#26 error hierarchy.
+3. ✅ **`publishConfig.access: public`** — present in the tail of
+   `package.json` (covered in earlier PR #15 audit too).
+4. ✅ **License & repository fields.** `license: MIT`, repository
+   URL with `directory: packages/sdk` (correct for monorepo
+   subpackage publish).
+5. ✅ **Keywords.** `solana / anchor / agent / marketplace / a2a /
+   usdc / sdk` — discoverable and accurate; no spam keywords.
+
+**Two informational notes (not findings):**
+
+- **O1. Source maps in tarball.** `dist/index.cjs.map` and
+  `dist/index.js.map` ship with the published package. They embed
+  the original TypeScript source, so any consumer can read the
+  full SDK source via the source map. This is **standard for
+  open-source SDKs** and not a leak — the source code is
+  open-source-licensable (MIT). Worth knowing if you ever decide
+  to ship a closed-source build (in which case set `sourcemap:
+  false` in `tsup.config.ts`). For an MVP that's already on
+  GitHub, no action.
+- **O2. Hardcoded program ID in shipped JS.**
+  `register.ts` and `discover.ts` have `new PublicKey('GJRgCCqkYvAezidpdd3i4p4kRRfJnM1EfGfgqYgchQqd')`.
+  The bundled CJS/ESM emit will inline that string. **Not a
+  secret** — it's the public devnet program ID per ADR-0001 / Task
+  #4. But: this hardcodes a *devnet* address into a published SDK,
+  so the SDK can't be used against mainnet without a code change.
+  When the program is redeployed to mainnet (post-Squads
+  multisig handover), this address needs to come from a config
+  field or a per-cluster constant table (`PROGRAM_IDS.devnet`,
+  `PROGRAM_IDS.mainnet`). Worth tracking against the mainnet
+  release plan.
+
+**Mainnet release-gate verdict:** N/A — metadata + docs, no
+runtime. No action needed for npm publish from a security
+standpoint. The actual `npm publish` step will need:
+- `npm publish --access public` (or `--otp` if 2FA is on the
+  account).
+- Confirm the npm account is the right org account, not a
+  personal one (per the agentbazaar_commit_conventions rule
+  about not attributing to user).
+- Provenance attestation (`npm publish --provenance`) is
+  recommended for transparency.
+
+Cleared to merge. The dry-run output is exactly what we want to
+see; ready for actual publish whenever team-lead green-lights.
+
+---
+
+## PR #32 — feature/backend-helius-webhook — 2026-04-25
+**Verdict:** APPROVED with one Low finding (auth-deferred-to-Task-#15)
+that **must upgrade to Medium before Task #15 lands**, plus three
+informational notes.
+
+This PR consolidates two things:
+1. **Bundled PR #29 fixes** (M1 dotenv-mono ESM ordering, M2
+   app.ts/index.ts split, L1+O1 src/env.ts Zod schema). Cherry-picked
+   as commit `ead20a3` per backend-eng. Re-walked: file contents
+   match what I approved on PR #29's branch — **APPROVED verdict
+   from PR #29 carries over unchanged.**
+2. **New Helius webhook receiver scaffold** for Task #14.
+
+**Scope walked (new code only):**
+- `apps/indexer/src/webhooks/types.ts` (new, +47) — Zod schemas
+  for Helius enhanced-tx payload
+- `apps/indexer/src/webhooks/handler.ts` (new, +41) — receive-only
+  filter-and-count handler
+- `apps/indexer/src/app.ts` (+6 / -0) — wires `POST /webhooks/helius`
+- `apps/indexer/tests/webhook.test.ts` (new, +85) — 6 tests
+- `apps/indexer/src/db/schema.ts` (new, +14 — actually already
+  merged in PR #24; included here for branch hygiene)
+- `apps/indexer/drizzle/0001_mean_landau.sql` + meta — migration
+  artifacts
+
+**Five focus-area answers (backend-eng's list):**
+
+1. ✅ **SSRF — receive-only.** `handler.ts` does no outbound HTTP
+   (no `fetch`, no `axios`, no `helius-sdk` API calls). Only reads
+   request body via `c.req.json()` and writes response via
+   `c.json(...)`. IPFS metadata fetch deferred to Task #15 — that
+   audit will need its own walk.
+
+2. ⚠️ **Signature verification — DEFERRED.** `HELIUS_WEBHOOK_SECRET`
+   is declared `.optional()` in `src/env.ts`, but **the handler
+   does not enforce it.** No HMAC-SHA256 check; no source-IP
+   allowlist; no replay protection. See **L1** below — acceptable
+   for the current stub state, **must close before Task #15**.
+
+3. ✅ **Env validation.** `src/env.ts` Zod schema (carried from
+   PR #29) parses NODE_ENV, PORT, DATABASE_URL (required +
+   URL-validated), HELIUS_API_KEY, HELIUS_WEBHOOK_SECRET (both
+   `.min(1).optional()`). Fail-fast at startup.
+
+4. ✅ **Input validation — `HeliusWebhookPayloadSchema`.** Top-level
+   `z.array(HeliusEventSchema)` rejects non-array payloads
+   (test covers); each event validates required fields
+   (`description`, `type`, `source`, `fee`, `feePayer`, `signature`,
+   `slot`, `timestamp`, `accountData`, `instructions`). 400 with
+   `{ error, details }` on parse failure.
+
+   **Loosely-typed fields (informational, not findings — see O1):**
+   `description: z.string()` no max length; `tokenBalanceChanges:
+   z.array(z.unknown())` and `events: z.record(z.unknown())`
+   completely unvalidated. None of these are read by the current
+   handler; they only become a concern when Task #15 starts
+   processing event content. Tighten then.
+
+   **Pubkey-shaped fields** (`feePayer`, `programId`, `accounts`)
+   are `z.string()` — no base58 refinement. **This time it's
+   safe** because the handler only does strict-equality compares
+   (`ix.programId === BAZAAR_REGISTRY_PROGRAM_ID`) — no
+   `new PublicKey()` parse that could throw. Worth keeping in
+   mind for Task #15 if pubkeys flow into upserts that hit
+   `bytea` columns.
+
+5. ✅ **drizzle.config.ts inline `dotenvLoad()` workaround.**
+   The header comment documents the reason:
+   > drizzle-kit runs this file via jiti (CJS), which doesn't
+   > follow NodeNext module resolution for local .js→.ts mapping.
+   > Load env directly here instead of importing src/env.ts to
+   > stay drizzle-kit compatible.
+
+   Confirmed jiti's `.js→.ts` mapping limitation under NodeNext.
+   The workaround:
+   - `dotenvLoad()` called inline.
+   - `dbUrl = process.env['DATABASE_URL']`.
+   - `if (!dbUrl) throw new Error(...)` — fail-fast guard preserves
+     the safety the env.ts schema provides for the rest of the app.
+
+   Structurally inconsistent with the rest of the indexer (which
+   uses `env.ts`), but the safety property is preserved. Acceptable
+   trade-off given the toolchain constraint. **O2 informational.**
+
+**Findings:**
+
+- **Critical:** none.
+- **High:** none.
+- **Medium:** none (yet — see L1).
+
+- **Low:**
+
+  - **L1. Webhook endpoint is publicly exposed without
+    authentication.** `POST /webhooks/helius` accepts any caller
+    that sends a Helius-shaped JSON payload. No HMAC verification
+    against `HELIUS_WEBHOOK_SECRET`, no source-IP allowlist, no
+    replay protection (signature-based dedup or timestamp window).
+
+    **Acceptable for the current stub state** — the handler does
+    NOT write to the database, sign anything, or move funds. Worst
+    case today: an attacker spams the endpoint with valid-shaped
+    payloads → CPU + log-volume burn. Railway has platform-level
+    DoS protection.
+
+    **MUST upgrade to Medium and land HMAC verification BEFORE
+    Task #15 wires the upsert path.** The moment the handler
+    starts writing to `service_listings`, an unauthenticated
+    endpoint becomes a database-pollution / state-corruption
+    vector. Specifically required before Task #15:
+
+    1. **HMAC-SHA256 over raw request body** using
+       `HELIUS_WEBHOOK_SECRET` (Helius signs the body with this
+       secret in the `X-Helius-Signature` header — verify before
+       any business logic runs).
+    2. **Replay protection** — Helius webhooks can deliver events
+       multiple times. Use `event.signature` (Solana tx signature)
+       as a unique key in the upsert; dedupe on conflict.
+    3. **Constant-time comparison** for the HMAC check (not `===`)
+       to avoid timing-based secret extraction.
+    4. **Source-IP allowlist (optional, defense-in-depth)** —
+       Helius publishes outgoing IP ranges; allowlist them at
+       Railway's edge or in the handler. HMAC alone is sufficient
+       in principle.
+
+    Mark `HELIUS_WEBHOOK_SECRET` as `.min(64)` (or whatever Helius
+    returns — typically a long base64 string) and flip from
+    `.optional()` to **required** at the same time. Failing fast
+    at indexer startup if the secret is unset is better than
+    silently running unauthenticated.
+
+**Three informational notes (not findings):**
+
+- **O1. Loose-shape fields in `HeliusEventSchema`.** `description`
+  has no max length, `tokenBalanceChanges` and `events` are
+  `z.array(z.unknown())` / `z.record(z.unknown())`. None are read
+  by the current handler. When Task #15 starts processing them,
+  add tighter schemas and length caps to prevent
+  memory-exhaustion via oversized payloads.
+
+- **O2. drizzle.config.ts uses inline `dotenvLoad()` due to jiti
+  CJS limitation.** Documented in the file header. Alternative
+  considered: import compatibility shim. The current workaround
+  is sound — preserves fail-fast on missing `DATABASE_URL`, just
+  duplicates the env-loading code path. Worth noting if jiti ever
+  ships NodeNext support so the workaround can be retired.
+
+- **O3. No rate limiting at the Hono layer.** Hono doesn't ship
+  rate-limiting middleware out of the box. Railway has
+  platform-level limits, but webhook endpoints often get tight
+  per-IP caps (e.g., 100 req/min). For prod, consider
+  `hono-rate-limiter` or Cloudflare's WAF rate-limiting rule when
+  the indexer is deployed. Not a concern for M0 devnet.
+
+**Cross-cutting carryover:**
+PR #19's L6 (server-side `memcmp` filtering on `capability_hash`)
+— the Drizzle schema already has the right indexes
+(`idx_service_listings_capability_hash` and the composite
+`idx_service_listings_discover` on `(capability_hash, is_active,
+price_lamports)`). When Task #16 wires the Discovery API endpoint,
+that's the WHERE clause to expose. **L6 closure trajectory looks
+clean.**
+
+PR #2 M2 (`price_lamports` IDL rename): the schema explicitly
+mirrors the IDL field name with a NOTE comment acknowledging the
+rename pending M1 escrow ship. ✅ tracked.
+
+**Mainnet release-gate verdict:** N/A — handler is a stub.
+**L1 must close before Task #15.** Otherwise the indexer is
+unprepared for production webhook traffic — open endpoint + DB
+writes is a state-corruption vector.
+
+**Recommended fix order:**
+1. **Before Task #15:** L1 — HMAC verification + replay
+   protection + flip `HELIUS_WEBHOOK_SECRET` to required.
+2. **Soon (Task #15):** O1 — tighten loose-shape fields when
+   they get read.
+3. **Pre-prod:** O3 — rate limiting at Hono or Railway edge.
+
+None of these block PR #32's merge for M0 sandbox testing.
