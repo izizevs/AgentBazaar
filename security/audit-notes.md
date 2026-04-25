@@ -494,3 +494,316 @@ register_service CPI), `hire` (escrow create + USDC transfer), and
 will be the substantive audits; this one establishes the perimeter.
 
 No blocker. Cleared to merge.
+
+---
+
+## PR #17 — feature/sdk-register-impl — 2026-04-25
+**Verdict:** APPROVED (with two Medium and four Low non-blocking findings;
+two of the Mediums should land before any mainnet flow).
+
+First substantive method-body audit per the M0 plan. `AgentBazaar.register()`
+glues Pinata IPFS upload, capability-hash derivation, PDA derivation,
+duplicate-listing guard, ix construction, and tx send-with-retry.
+
+**Scope of review:**
+- `packages/sdk/src/register.ts` (new, +186) — main flow
+- `packages/sdk/src/client.ts` (+19 / -5) — adds `pinataJwt` to config + wires register
+- `packages/sdk/src/types.ts` (+10 / -2) — extends `RegisterInput` with metadata fields
+- `packages/sdk/tests/register.test.ts` (new, +393) — 18 unit tests
+- `packages/sdk/package.json` (+2) — adds `bn.js` direct dep
+- `pnpm-lock.yaml` (+17 / -4) — minimal lockfile delta
+
+**Findings:**
+
+- **Critical:** none.
+- **High:** none.
+
+- **Medium:**
+  - **M1. `endpoint` field bypasses MetadataSchema validation.** The
+    flow validates via `MetadataSchema.safeParse({ name, description,
+    capability, avatar, custom })` (step 1), then in step 6 builds
+    `fullMetadata = { ...parseResult.data, endpoint: input.endpoint }`
+    and uploads that. The schema does **not** include `endpoint`, so
+    `input.endpoint` lands in the public metadata JSON unvalidated.
+    Same threat surface as the L2 we patched on PR #12 for `avatar`:
+    a malicious agent can register with a `javascript:` /
+    `data:text/html,...` / `file://` / megabyte-long endpoint that
+    later gets rendered or dereferenced by the dashboard / a hiring
+    consumer. An HTTPS endpoint is the only sensible value here.
+    **Fix:** add `endpoint: z.string().url().refine(u => u.startsWith('https://'), 'Endpoint must use HTTPS').max(256)`
+    to `MetadataSchema` in `packages/idl/src/metadata-schema.ts`,
+    OR keep the schema unchanged and validate inline before the upload
+    in `register.ts`. The schema route is cleaner — same place the
+    avatar guard lives. Non-blocking for devnet integration; blocker
+    for mainnet.
+  - **M2. `confirmTransaction` result not checked for `value.err`.**
+    Step 9 awaits `confirmTransaction({ signature, blockhash,
+    lastValidBlockHeight }, 'confirmed')` and immediately returns
+    `{ listing, signature }`. `confirmTransaction` resolves
+    successfully even when the on-chain instruction reverted —
+    `result.value.err` is non-null but ignored. As a result, an
+    on-chain failure (program rejecting `InvalidPricingModel` /
+    `MetadataUriTooLong` / `InvalidUptimePct` / etc.) is reported to
+    the caller as a successful registration with a valid PDA
+    address, even though the listing was never created. Worse, the
+    retry loop doesn't re-attempt because the outer `try` catches
+    only thrown errors, not `value.err`. **Fix:**
+    ```ts
+    const result = await connection.confirmTransaction({...}, 'confirmed');
+    if (result.value.err) {
+      throw new TransactionFailedError(
+        `Program error: ${JSON.stringify(result.value.err)}`,
+        signature,
+      );
+    }
+    ```
+    Ideally also parse Anchor program errors via `AnchorError.parse`
+    so the user sees `MetadataUriTooLong` instead of an opaque
+    `{ InstructionError: [0, { Custom: 6002 }] }`. Non-blocking for
+    devnet sandbox testing; blocker for mainnet.
+
+- **Low:**
+  - **L1. `requireAllSignatures: false` on serialize is unnecessary.**
+    The PR body's rationale conflates two flags: `verifySignatures: false`
+    is the redundancy with on-chain Ed25519 verification (correct),
+    but `requireAllSignatures: false` is independent — it disables the
+    "all required signers present" check at serialize time. With one
+    signer (`feePayer = wallet.publicKey`), `wallet.signTransaction`
+    should always return a fully-signed tx. Setting this to `false`
+    only loses an early-fail signal if the wallet returns an unsigned
+    or partially-signed tx (e.g., user denied in a modal). Keep
+    `verifySignatures: false`; flip `requireAllSignatures` to its
+    `true` default for clearer errors.
+  - **L2. No range check on `priceUsdc` / `satiAgentId` against u64
+    bounds.** Both come in as `bigint` and flow into `new BN(value.toString())`.
+    A negative value or one > `2^64 - 1` would either silently
+    truncate or trip Anchor's borsh codec with a confusing low-level
+    error. Add a guard:
+    ```ts
+    const U64_MAX = 2n ** 64n - 1n;
+    if (input.priceUsdc < 0n || input.priceUsdc > U64_MAX) {
+      throw new ValidationError('priceUsdc out of u64 range');
+    }
+    ```
+    Same for `satiAgentId`.
+  - **L3. `pinataJwt` is a public enumerable property on the client.**
+    `class AgentBazaar { readonly pinataJwt: string | undefined; ... }` —
+    accidental `console.log(client)` / `JSON.stringify(client)` /
+    error-reporter capturing class instances would leak the JWT.
+    Migrate to a `#pinataJwt` private class field, OR mark it
+    non-enumerable, OR pass via a closure (e.g.,
+    `getPinataJwt: () => string`). Cheap fix; meaningful in a tooling
+    setup that captures full state on errors.
+  - **L4. Race between duplicate-check and `init`.** Step 5 reads
+    `program.account.serviceListing.fetchNullable(listingPda)`; step 8+9
+    sends a tx that `init`s the same PDA. If a competing register
+    races between the two, the on-chain `init` constraint fails —
+    but the user sees a `TransactionFailedError` from the retry loop
+    rather than the meaningful `DuplicateListingError`. With M2's fix,
+    the on-chain error code (account already in use → `0x0`) becomes
+    visible and could be mapped to `DuplicateListingError` for
+    consistency. Tiny race window; cosmetic.
+
+**Six focus-area answers (sdk-eng's list):**
+
+1. ✅ **Pinata JWT — no leakage paths found.** JWT flows
+   `AgentBazaarConfig.pinataJwt` → `AgentBazaar.pinataJwt` →
+   `registerService(...pinataJwt)` → `uploadMetadata(...pinataJwt)`.
+   In `uploadMetadata` it appears only in
+   `headers: { Authorization: \`Bearer ${pinataJwt}\` }` — sent to
+   Pinata, never to Solana RPC. No `console.log`, no error message
+   includes the JWT. Three Pinata error paths
+   (`Pinata upload failed: ${status}`, `missing data.cid`, `CID too
+   long`) all interpolate only safe metadata. Retry loop's
+   `lastError.message` only catches errors from `signTransaction` /
+   `sendRawTransaction` / `confirmTransaction` — none of which see
+   the JWT. **L3 above** is the only adjacent concern: the JWT is
+   stored as a public property on the client, so accidental
+   serialization of the client object would leak it. The actual
+   data flow is clean.
+2. ⚠️ **`requireAllSignatures: false` — see L1.** The
+   `verifySignatures: false` half is correct (redundant with on-chain
+   verification). The `requireAllSignatures: false` half is a
+   separate flag with no rationale that holds; flip it back to the
+   default.
+3. ✅ **`MetadataSchema.safeParse()` validates before upload — but
+   incompletely.** The validation runs in step 1, before any IPFS
+   call or on-chain interaction (good). However the uploaded payload
+   in step 6 spreads `parseResult.data` and then **adds `endpoint`
+   from the unvalidated input** (M1). So the *fields covered by the
+   schema* are validated correctly; `endpoint` is the gap.
+4. ✅ **CID length guard ≤64 chars.** Matches the on-chain
+   `MAX_METADATA_URI = 64`. CIDs are ASCII (base32/base58) so 1 char
+   = 1 byte; the on-chain `String` byte-length check will agree.
+   Test covers the 65-char rejection. Good.
+5. ✅ **`wallet as any` cast is functionally safe.** `AnchorProvider`
+   internally only reads `publicKey` and calls `signTransaction` /
+   `signAllTransactions` — all three are present on `AnchorWallet`.
+   The missing field is `payer: Keypair`, which Anchor only touches
+   if you call `provider.wallet.payer` directly (we don't). The
+   `as any` could be tightened to
+   `wallet as unknown as anchor.Wallet` for narrower scope, but the
+   current form is honest about the bypass. No security impact.
+6. ✅ **`bn.js` direct dep is correct.** Anchor already depends on
+   `bn.js` transitively; declaring it directly removes the implicit
+   coupling. Usage:
+   `new BN(input.satiAgentId.toString())` — bigint → decimal string
+   → BN. Correct shape; `BN` accepts decimal-digit strings of any
+   length. **L2 above** flags the missing range check (BN itself is
+   arbitrary-precision, so won't throw on overflow until borsh
+   serialization).
+
+**Additional observations (informational):**
+
+- **O1.** Pinata upload happens *after* the duplicate-listing guard
+  (step 5 → step 6). Good — saves a wasted IPFS upload on the
+  duplicate-already-exists case. Non-trivial improvement over the
+  alternative ordering; nice.
+- **O2.** Retry loop calls `wallet.signTransaction(tx)` on every
+  attempt. Required because each retry uses a fresh `recentBlockhash`,
+  so the prior signature would be invalid. UX consequence: hardware
+  wallets prompt up to 3 times. Not a security issue — flagged for
+  the dashboard team to set the user expectation.
+- **O3.** Tests fully mock `@coral-xyz/anchor` (`AnchorProvider`,
+  `Program`). That isolates the tests from the IDL but means the
+  ix arg encoding (capability_hash byte order, BN → u64) is **not**
+  exercised end-to-end in this PR. The IDL snapshot test in
+  `packages/idl` covers IDL drift, but the encoder path isn't
+  covered until an integration test against `solana-test-validator`
+  lands. Flag for **qa-test-eng** in M0 wrap-up — coverage gap, not
+  a finding.
+- **O4.** `vi.stubGlobal('fetch', mockFetch)` without a corresponding
+  `vi.unstubAllGlobals()` in cleanup. With Vitest's default
+  `restoreMocks: false`, the global `fetch` stub bleeds across files
+  if other suites are added later. Defense-in-depth: add
+  `afterEach(() => vi.unstubAllGlobals())`. Hygiene, not a security
+  issue.
+- **O5.** `priorityFee` escalation tops at 500 000 µL/CU. With a
+  ~200K CU budget, that's 100M µL = 0.0001 SOL — negligible. No
+  abuse vector.
+- **O6.** Tests cover: validation rejection, Pinata error paths
+  (non-OK status, missing CID, oversized CID, Bearer header
+  presence), duplicate guard (active vs inactive), happy path with
+  full metadata round-trip, deterministic PDA derivation, retry
+  succeeding on 2nd attempt, all-3-fail → `TransactionFailedError`,
+  priority-fee escalation visible in instruction list, integration
+  with `AgentBazaar` client (NotImplementedError without
+  `pinataJwt`). 18 tests is thorough for the contract this PR
+  exposes; coverage is solid where it can be (everything except the
+  Anchor codec and real validator interaction).
+
+**Recommended fixes (for sdk-eng follow-up, ordered by urgency):**
+
+1. **Before mainnet:** check `confirmTransaction.value.err` and
+   throw `TransactionFailedError(signature)` (M2). On-chain reverts
+   silently appearing as success is the most user-impactful gap.
+2. **Before mainnet:** validate `endpoint` via the schema or
+   inline (M1). Same reasoning as the avatar guard from PR #12.
+3. **Soon:** flip `requireAllSignatures` back to `true` (L1);
+   add u64 range check on `priceUsdc` / `satiAgentId` (L2);
+   privatize `pinataJwt` (L3).
+4. **Nice-to-have:** parse Anchor program errors and map
+   "account already in use" to `DuplicateListingError` (L4 +
+   companion to M2).
+
+None of these block merging PR #17 for M0 devnet integration. The
+transaction-confirmation-correctness gap (M2) and the unvalidated
+endpoint (M1) are the two that should land before any real value
+flows.
+
+### Follow-up — 2026-04-25 re-review (commit `bcd0070`)
+
+**Status:** all five addressed findings verified clean. **Verdict
+upgraded to APPROVED — MAINNET-READY** for the `register()` flow
+(modulo cross-PR M2 IDL rename and the usual mainnet pre-flight
+checklist). L4 was cosmetic and remains open as a nice-to-have;
+not gating.
+
+sdk-eng landed `fix(sdk): address security-auditor M1/M2/L1/L2/L3
+findings on register()` (`bcd0070`). Re-walked:
+
+- **M1 — endpoint validation → FIXED.** `endpoint` is now a
+  required field on `MetadataSchema`:
+  ```ts
+  endpoint: z.string().url().max(256)
+    .refine((u) => u.startsWith('https://'), 'Endpoint must use HTTPS'),
+  ```
+  `register.ts` step 1 includes `endpoint: input.endpoint` in the
+  parsed payload; step 7 uploads `parseResult.data` directly (no
+  spread of unvalidated input). All pre-existing IDL test fixtures
+  updated. New negative test in `idl-snapshot.test.ts` rejects
+  `http://`, `javascript:`, `ftp://`; matching test in
+  `register.test.ts` rejects the same set with `ValidationError`.
+  Symmetry with the avatar guard from PR #12 is now exact.
+
+- **M2 — confirmTransaction error check → FIXED.** Inside the
+  retry loop's `try`:
+  ```ts
+  const result = await connection.confirmTransaction({...}, 'confirmed');
+  if (result.value.err) {
+    throw new TransactionFailedError(
+      `Program error: ${JSON.stringify(result.value.err)}`,
+      signature,
+    );
+  }
+  ```
+  On-chain reverts now throw inside `try`, caught by outer
+  `catch`, advance `lastError`, and continue the retry loop.
+  Deterministic on-chain failures will burn all 3 retry attempts
+  before surfacing — UX cost, not correctness. Failure can no
+  longer mask as success.
+
+- **L1 — requireAllSignatures default → FIXED, even stricter.**
+  Original recommendation: "keep `verifySignatures: false` for
+  performance". sdk-eng dropped both options on
+  `signed.serialize()`, restoring full defaults. Tiny CPU cost on
+  a single-tx Ed25519 verify in exchange for catching
+  missing/corrupt signatures before the network round-trip. Net
+  positive. Test wallet mock now signs with the keypair so
+  serialization succeeds with the stricter defaults.
+
+- **L2 — u64 range checks → FIXED.** `U64_MAX = 2^64 - 1n`
+  constant; both `priceUsdc` and `satiAgentId` are guarded
+  (`< 0n || > U64_MAX → ValidationError`) before `BN` encoding.
+  Two new tests cover negative `priceUsdc` and `priceUsdc = 2^64`.
+  Coverage note: no negative test for `satiAgentId` — same code
+  path; a parallel test would be a nice symmetry.
+
+- **L3 — pinataJwt private → FIXED, with bonus.**
+  `readonly #pinataJwt: string | undefined` (true ECMAScript
+  private class field — invisible to `Object.keys` /
+  `Object.entries` / `Reflect.ownKeys` / `JSON.stringify`).
+  Bonus: `toJSON()` returns
+  `{ wallet: { publicKey: this.wallet.publicKey.toBase58() } }`,
+  which prevents Connection internals from causing circular-ref
+  errors and limits disclosed surface to the public key.
+
+**Test infrastructure fixes verified:**
+- `vi.stubGlobal('fetch', mockFetch)` moved to `beforeEach` with
+  `afterEach(() => vi.unstubAllGlobals())`. Matches O4 from the
+  initial review. No cross-file stub leakage.
+- `import { Transaction }` (value) for the runtime
+  `tx instanceof Transaction` check.
+
+**Remaining open items (not gating):**
+
+- **L4 — duplicate-listing race.** Cosmetic. With M2 in place, the
+  on-chain "account already in use" error is now visible in
+  `result.value.err`; mapping that to `DuplicateListingError`
+  would unify failure semantics. Fold into a future Anchor
+  program-error parsing pass.
+- **O3 from initial review — Anchor codec coverage.**
+  `@coral-xyz/anchor` is still fully mocked, so capability_hash
+  byte-order + BN→u64 borsh + IDL-arg shape aren't exercised
+  end-to-end. Integration test against `solana-test-validator`
+  is the gap; remains flagged for qa-test-eng in M0 wrap-up.
+- **M2 from PR #2 — `price_lamports` IDL rename.** Still pending
+  on anchor-eng. SDK already uses `priceUsdc` semantically; rename
+  is program/IDL-side. Snapshot test will catch drift.
+
+**Mainnet release-gate verdict (security side):** **CLEARED for
+`register()` flow.** Remaining items are cosmetic / observability
+/ cross-PR follow-ups; none expose a real-money risk on
+`register_service` specifically. Future flows (`hire`, `confirm`,
+`claimTimeout`, `dispute`) will each need their own audit walk
+when they land.
