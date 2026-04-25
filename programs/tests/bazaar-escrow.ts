@@ -22,6 +22,7 @@ import type { BazaarRegistry } from '../target/types/bazaar_registry';
 const ESCROW_SEED = Buffer.from('escrow');
 const VAULT_SEED = Buffer.from('vault');
 const LISTING_SEED = Buffer.from('listing');
+const EVENT_AUTHORITY_SEED = Buffer.from('__event_authority');
 const USDC_DECIMALS = 6;
 const ONE_USDC = 1_000_000; // 1 USDC in base units
 
@@ -68,6 +69,10 @@ function vaultPda(escrowProgramId: PublicKey, escrow: PublicKey): PublicKey {
 // Registry verifies seeds::program = BAZAAR_ESCROW_ID to prevent direct calls.
 function escrowAuthorityPda(escrowProgramId: PublicKey): PublicKey {
   return PublicKey.findProgramAddressSync([Buffer.from('authority')], escrowProgramId)[0];
+}
+
+function eventAuthorityPda(programId: PublicKey): PublicKey {
+  return PublicKey.findProgramAddressSync([EVENT_AUTHORITY_SEED], programId)[0];
 }
 
 // ---------------------------------------------------------------------------
@@ -125,6 +130,8 @@ async function setupEscrow(
   // Register a listing for the seller in bazaar-registry
   const capHash = hashCapability(`ai.test.${randomBytes(4).toString('hex')}`);
   const listing = listingPda(registryProgram.programId, seller.publicKey, capHash);
+  const registryEventAuthority = eventAuthorityPda(registryProgram.programId);
+  const escrowEventAuthority = eventAuthorityPda(escrowProgram.programId);
   await registryProgram.methods
     .registerService(
       [...capHash],
@@ -144,6 +151,8 @@ async function setupEscrow(
       owner: seller.publicKey,
       listing,
       systemProgram: SystemProgram.programId,
+      eventAuthority: registryEventAuthority,
+      program: registryProgram.programId,
     } as any)
     .signers([seller])
     .rpc();
@@ -170,6 +179,8 @@ async function setupEscrow(
       tokenProgram: TOKEN_PROGRAM_ID,
       systemProgram: SystemProgram.programId,
       rent: SYSVAR_RENT_PUBKEY,
+      eventAuthority: escrowEventAuthority,
+      program: escrowProgram.programId,
     } as any)
     .signers([buyer])
     .rpc();
@@ -202,8 +213,12 @@ describe('bazaar-escrow', () => {
 
   let mintAuthority: Keypair;
   let usdcMint: PublicKey;
+  let escrowEventAuthority: PublicKey;
+  let registryEventAuthority: PublicKey;
 
   before(async () => {
+    escrowEventAuthority = eventAuthorityPda(escrowProgram.programId);
+    registryEventAuthority = eventAuthorityPda(registryProgram.programId);
     // Shared USDC test mint — one per test run
     mintAuthority = Keypair.generate();
     await fund(connection, mintAuthority.publicKey, 5);
@@ -269,6 +284,8 @@ describe('bazaar-escrow', () => {
           owner: seller.publicKey,
           listing,
           systemProgram: SystemProgram.programId,
+          eventAuthority: registryEventAuthority,
+          program: registryProgram.programId,
         } as any)
         .signers([seller])
         .rpc();
@@ -291,6 +308,8 @@ describe('bazaar-escrow', () => {
             tokenProgram: TOKEN_PROGRAM_ID,
             systemProgram: SystemProgram.programId,
             rent: SYSVAR_RENT_PUBKEY,
+            eventAuthority: escrowEventAuthority,
+            program: escrowProgram.programId,
           } as any)
           .signers([buyer])
           .rpc();
@@ -324,6 +343,8 @@ describe('bazaar-escrow', () => {
           vault,
           sellerTokenAccount,
           tokenProgram: TOKEN_PROGRAM_ID,
+          eventAuthority: escrowEventAuthority,
+          program: escrowProgram.programId,
         } as any)
         .signers([seller])
         .rpc();
@@ -354,6 +375,8 @@ describe('bazaar-escrow', () => {
             vault,
             sellerTokenAccount: outsiderToken,
             tokenProgram: TOKEN_PROGRAM_ID,
+            eventAuthority: escrowEventAuthority,
+            program: escrowProgram.programId,
           } as any)
           .signers([outsider])
           .rpc();
@@ -387,6 +410,8 @@ describe('bazaar-escrow', () => {
           vault: f.vault,
           sellerTokenAccount: f.sellerTokenAccount,
           tokenProgram: TOKEN_PROGRAM_ID,
+          eventAuthority: escrowEventAuthority,
+          program: escrowProgram.programId,
         } as any)
         .signers([f.seller])
         .rpc();
@@ -410,6 +435,8 @@ describe('bazaar-escrow', () => {
           registryProgram: registryProgram.programId,
           escrowAuthority,
           tokenProgram: TOKEN_PROGRAM_ID,
+          eventAuthority: escrowEventAuthority,
+          program: escrowProgram.programId,
         } as any)
         .signers([f.buyer])
         .rpc();
@@ -442,6 +469,8 @@ describe('bazaar-escrow', () => {
           registryProgram: registryProgram.programId,
           escrowAuthority,
           tokenProgram: TOKEN_PROGRAM_ID,
+          eventAuthority: escrowEventAuthority,
+          program: escrowProgram.programId,
         } as any)
         .signers([f.buyer])
         .rpc();
@@ -475,6 +504,8 @@ describe('bazaar-escrow', () => {
           registryProgram: registryProgram.programId,
           escrowAuthority,
           tokenProgram: TOKEN_PROGRAM_ID,
+          eventAuthority: escrowEventAuthority,
+          program: escrowProgram.programId,
         } as any)
         .signers([f.buyer])
         .rpc();
@@ -503,6 +534,8 @@ describe('bazaar-escrow', () => {
           registryProgram: registryProgram.programId,
           escrowAuthority,
           tokenProgram: TOKEN_PROGRAM_ID,
+          eventAuthority: escrowEventAuthority,
+          program: escrowProgram.programId,
         } as any)
         .signers([f.buyer])
         .rpc();
@@ -531,6 +564,8 @@ describe('bazaar-escrow', () => {
             registryProgram: registryProgram.programId,
             escrowAuthority,
             tokenProgram: TOKEN_PROGRAM_ID,
+            eventAuthority: escrowEventAuthority,
+            program: escrowProgram.programId,
           } as any)
           .signers([outsider])
           .rpc();
@@ -562,6 +597,8 @@ describe('bazaar-escrow', () => {
             registryProgram: registryProgram.programId,
             escrowAuthority,
             tokenProgram: TOKEN_PROGRAM_ID,
+            eventAuthority: escrowEventAuthority,
+            program: escrowProgram.programId,
           } as any)
           .signers([f.buyer])
           .rpc();
@@ -586,6 +623,8 @@ describe('bazaar-escrow', () => {
         registryProgram: registryProgram.programId,
         escrowAuthority,
         tokenProgram: TOKEN_PROGRAM_ID,
+        eventAuthority: escrowEventAuthority,
+        program: escrowProgram.programId,
       } as any;
 
       await escrowProgram.methods
@@ -637,6 +676,8 @@ describe('bazaar-escrow', () => {
           owner: seller.publicKey,
           listing,
           systemProgram: SystemProgram.programId,
+          eventAuthority: registryEventAuthority,
+          program: registryProgram.programId,
         } as any)
         .signers([seller])
         .rpc();
@@ -678,6 +719,8 @@ describe('bazaar-escrow', () => {
           vault: f.vault,
           sellerTokenAccount: f.sellerTokenAccount,
           tokenProgram: TOKEN_PROGRAM_ID,
+          eventAuthority: escrowEventAuthority,
+          program: escrowProgram.programId,
         } as any)
         .signers([f.seller])
         .rpc();
@@ -691,6 +734,8 @@ describe('bazaar-escrow', () => {
             vault: f.vault,
             sellerTokenAccount: f.sellerTokenAccount,
             tokenProgram: TOKEN_PROGRAM_ID,
+            eventAuthority: escrowEventAuthority,
+            program: escrowProgram.programId,
           } as any)
           .signers([f.seller])
           .rpc();
@@ -719,6 +764,8 @@ describe('bazaar-escrow', () => {
             vault: f.vault,
             sellerTokenAccount: f.sellerTokenAccount,
             tokenProgram: TOKEN_PROGRAM_ID,
+            eventAuthority: escrowEventAuthority,
+            program: escrowProgram.programId,
           } as any)
           .signers([f.seller])
           .rpc();
@@ -752,6 +799,8 @@ describe('bazaar-escrow', () => {
           vault: f.vault,
           buyerTokenAccount: f.buyerTokenAccount,
           tokenProgram: TOKEN_PROGRAM_ID,
+          eventAuthority: escrowEventAuthority,
+          program: escrowProgram.programId,
         } as any)
         .signers([f.buyer])
         .rpc();
@@ -779,6 +828,8 @@ describe('bazaar-escrow', () => {
           vault: f.vault,
           sellerTokenAccount: f.sellerTokenAccount,
           tokenProgram: TOKEN_PROGRAM_ID,
+          eventAuthority: escrowEventAuthority,
+          program: escrowProgram.programId,
         } as any)
         .signers([f.seller])
         .rpc();
@@ -792,6 +843,8 @@ describe('bazaar-escrow', () => {
           vault: f.vault,
           buyerTokenAccount: f.buyerTokenAccount,
           tokenProgram: TOKEN_PROGRAM_ID,
+          eventAuthority: escrowEventAuthority,
+          program: escrowProgram.programId,
         } as any)
         .signers([f.buyer])
         .rpc();
@@ -821,6 +874,8 @@ describe('bazaar-escrow', () => {
             vault: f.vault,
             buyerTokenAccount: outsiderToken,
             tokenProgram: TOKEN_PROGRAM_ID,
+            eventAuthority: escrowEventAuthority,
+            program: escrowProgram.programId,
           } as any)
           .signers([outsider])
           .rpc();
@@ -848,6 +903,8 @@ describe('bazaar-escrow', () => {
           vault: f.vault,
           sellerTokenAccount: f.sellerTokenAccount,
           tokenProgram: TOKEN_PROGRAM_ID,
+          eventAuthority: escrowEventAuthority,
+          program: escrowProgram.programId,
         } as any)
         .signers([f.seller])
         .rpc();
@@ -863,6 +920,8 @@ describe('bazaar-escrow', () => {
           registryProgram: registryProgram.programId,
           escrowAuthority,
           tokenProgram: TOKEN_PROGRAM_ID,
+          eventAuthority: escrowEventAuthority,
+          program: escrowProgram.programId,
         } as any)
         .signers([f.buyer])
         .rpc();
@@ -876,6 +935,8 @@ describe('bazaar-escrow', () => {
             vault: f.vault,
             buyerTokenAccount: f.buyerTokenAccount,
             tokenProgram: TOKEN_PROGRAM_ID,
+            eventAuthority: escrowEventAuthority,
+            program: escrowProgram.programId,
           } as any)
           .signers([f.buyer])
           .rpc();

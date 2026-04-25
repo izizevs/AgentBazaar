@@ -2,6 +2,7 @@ use anchor_lang::prelude::*;
 use anchor_spl::token::{self, Token, TokenAccount, Transfer};
 use bazaar_registry::program::BazaarRegistry;
 use bazaar_registry::ServiceListing;
+use crate::program::BazaarEscrow;
 
 declare_id!("EhFptDs4mz6rt7HDmt8pB7ZogiqxUMVhpjB3NvToXxW2");
 
@@ -80,7 +81,7 @@ pub mod bazaar_escrow {
         escrow.bump = ctx.bumps.escrow;
         escrow.vault_bump = ctx.bumps.vault;
 
-        emit!(EscrowCreated {
+        emit_cpi!(EscrowCreated {
             escrow: escrow.key(),
             buyer: escrow.buyer,
             seller: escrow.seller,
@@ -119,7 +120,7 @@ pub mod bazaar_escrow {
         escrow.result_hash = Some(result_hash);
         escrow.delivered_at = Some(clock.unix_timestamp);
 
-        emit!(EscrowStateChanged {
+        emit_cpi!(EscrowStateChanged {
             escrow: escrow.key(),
             buyer: escrow.buyer,
             seller: escrow.seller,
@@ -127,7 +128,7 @@ pub mod bazaar_escrow {
             new_state: EscrowState::Delivered,
             timestamp: clock.unix_timestamp,
         });
-        emit!(DeliverySubmitted {
+        emit_cpi!(DeliverySubmitted {
             escrow: escrow.key(),
             seller: escrow.seller,
             result_uri,
@@ -232,7 +233,7 @@ pub mod bazaar_escrow {
         let old = escrow.state;
         escrow.state = EscrowState::Confirmed;
 
-        emit!(EscrowStateChanged {
+        emit_cpi!(EscrowStateChanged {
             escrow: escrow.key(),
             buyer: escrow.buyer,
             seller: escrow.seller,
@@ -240,7 +241,7 @@ pub mod bazaar_escrow {
             new_state: EscrowState::Confirmed,
             timestamp: clock.unix_timestamp,
         });
-        emit!(SLAReport {
+        emit_cpi!(SLAReport {
             escrow: escrow.key(),
             buyer: escrow.buyer,
             seller: escrow.seller,
@@ -289,7 +290,7 @@ pub mod bazaar_escrow {
         let old = escrow.state;
         escrow.state = EscrowState::TimeoutClaimed;
 
-        emit!(EscrowStateChanged {
+        emit_cpi!(EscrowStateChanged {
             escrow: escrow.key(),
             buyer: escrow.buyer,
             seller: escrow.seller,
@@ -343,7 +344,7 @@ pub mod bazaar_escrow {
         let old = escrow.state;
         escrow.state = EscrowState::Disputed;
 
-        emit!(EscrowStateChanged {
+        emit_cpi!(EscrowStateChanged {
             escrow: escrow.key(),
             buyer: escrow.buyer,
             seller: escrow.seller,
@@ -351,7 +352,7 @@ pub mod bazaar_escrow {
             new_state: EscrowState::Disputed,
             timestamp: clock.unix_timestamp,
         });
-        emit!(DisputeOpened {
+        emit_cpi!(DisputeOpened {
             escrow: escrow.key(),
             buyer: escrow.buyer,
             reason,
@@ -435,6 +436,11 @@ pub struct CreateEscrow<'info> {
     // I3 note: Anchor 0.31 handles rent implicitly for token account init;
     // retained here for backward compat with existing test call sites.
     pub rent: Sysvar<'info, Rent>,
+
+    /// CHECK: Anchor event authority PDA for emit_cpi.
+    #[account(seeds = [b"__event_authority"], bump)]
+    pub event_authority: AccountInfo<'info>,
+    pub program: Program<'info, BazaarEscrow>,
 }
 
 #[derive(Accounts)]
@@ -465,6 +471,11 @@ pub struct SellerAction<'info> {
     pub seller_token_account: Account<'info, TokenAccount>,
 
     pub token_program: Program<'info, Token>,
+
+    /// CHECK: Anchor event authority PDA for emit_cpi.
+    #[account(seeds = [b"__event_authority"], bump)]
+    pub event_authority: AccountInfo<'info>,
+    pub program: Program<'info, BazaarEscrow>,
 }
 
 #[derive(Accounts)]
@@ -495,6 +506,11 @@ pub struct BuyerAction<'info> {
     pub buyer_token_account: Account<'info, TokenAccount>,
 
     pub token_program: Program<'info, Token>,
+
+    /// CHECK: Anchor event authority PDA for emit_cpi.
+    #[account(seeds = [b"__event_authority"], bump)]
+    pub event_authority: AccountInfo<'info>,
+    pub program: Program<'info, BazaarEscrow>,
 }
 
 #[derive(Accounts)]
@@ -552,6 +568,11 @@ pub struct ConfirmDelivery<'info> {
     pub escrow_authority: UncheckedAccount<'info>,
 
     pub token_program: Program<'info, Token>,
+
+    /// CHECK: Anchor event authority PDA for emit_cpi.
+    #[account(seeds = [b"__event_authority"], bump)]
+    pub event_authority: AccountInfo<'info>,
+    pub program: Program<'info, BazaarEscrow>,
 }
 
 // ---------------------------------------------------------------------------
