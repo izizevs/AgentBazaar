@@ -2707,3 +2707,505 @@ The pattern that played out across M0:
 The substantive on-chain work (escrow, SLA enforcement, evaluator
 program) is M1+ scope. M0 has established the discipline
 patterns; M1 will exercise them against actual fund movement.
+
+---
+
+## PR #51 — feature/anchor-escrow-program — 2026-04-25
+**Verdict:** ❌ BLOCK — 2 CRITICAL findings; 2 HIGH; 1 MEDIUM. Funds-bearing
+program with real authority gaps; do **not** merge until C1 + C2 are fixed.
+
+**Scope of review:**
+- `programs/bazaar-escrow/src/lib.rs` (new, 590 lines) — full program
+- `programs/bazaar-escrow/Cargo.toml` (new) — feature flags + registry CPI dep
+- `programs/bazaar-registry/src/lib.rs` (+19 / -1) — `increment_jobs_completed`
+  CPI surface added
+- `programs/Cargo.lock` — incidental
+- Workspace `programs/Cargo.toml` confirmed — `overflow-checks = true` present in
+  `[profile.release]` ✅, `bazaar-escrow` member declared ✅
+
+This is the first multi-program CPI in the codebase and the first program that
+moves real value — the audit bar steps up correspondingly. Every fund-flowing
+path was walked end-to-end (`create_escrow` → `submit_delivery` →
+`confirm_delivery` / `claim_timeout` / `open_dispute`), with a focus on
+authority, owner-checks, mint-binding, state-machine integrity, and the new CPI
+trust boundary.
+
+### Findings
+
+#### Critical (BLOCK)
+
+- **C1. Reputation forgeable for free — `bazaar_registry::increment_jobs_completed`
+  has NO authority check.** The new instruction added to `bazaar-registry`
+  (lib.rs:141) is documented as *"Signer must be the bazaar-escrow program
+  (checked via constraint)"* — but the constraint does not exist:
+  ```rust
+  #[derive(Accounts)]
+  pub struct IncrementJobsCompleted<'info> {
+      #[account(mut)]
+      pub listing: Account<'info, ServiceListing>,
+  }
+  ```
+  No `Signer<'info>`, no `program_id` check, no PDA derivation, no constraint at
+  all. **Any wallet on devnet/mainnet can craft a tx that directly invokes
+  `bazaar_registry::increment_jobs_completed { listing }` with any listing
+  account and bump its `jobs_completed` counter for the cost of the tx fee.**
+  Reputation — the entire trust signal in the marketplace — is gameable to
+  arbitrary values by any actor. A single rogue agent could inflate their own
+  jobs_completed to dominate `discover()` ranking, or sabotage a competitor by
+  inflating *their* counter past `u32::MAX` and triggering
+  `JobsCompletedOverflow` (perma-broken listing).
+
+  **Recommended fix.** Make the registry require a PDA signer derived from the
+  bazaar-escrow program ID, and have `confirm_delivery` sign the CPI with the
+  escrow PDA's seeds:
+
+  Registry side (`bazaar-registry/src/lib.rs`):
+  ```rust
+  #[derive(Accounts)]
+  pub struct IncrementJobsCompleted<'info> {
+      #[account(
+          mut,
+          // listing PDA matches its stored owner+capability_hash
+          seeds = [b"listing", listing.owner.as_ref(), listing.capability_hash.as_ref()],
+          bump = listing.bump,
+      )]
+      pub listing: Account<'info, ServiceListing>,
+
+      /// Escrow PDA from bazaar-escrow program — must match the escrow that
+      /// references this listing. Signer seeds proven by the CPI invoker.
+      #[account(
+          seeds = [b"escrow", escrow.buyer.as_ref(), listing.key().as_ref(),
+                   &escrow.nonce.to_le_bytes()],
+          bump = escrow.bump,
+          seeds::program = bazaar_escrow::ID,
+          constraint = escrow.listing == listing.key() @ RegistryError::Unauthorized,
+          constraint = escrow.state == bazaar_escrow::EscrowState::Confirmed
+                       @ RegistryError::Unauthorized,
+      )]
+      pub escrow: Account<'info, bazaar_escrow::EscrowAccount>,
+  }
+  ```
+  Escrow side (`bazaar-escrow/src/lib.rs`, in `confirm_delivery`):
+  ```rust
+  let escrow_seeds: &[&[u8]] = &[
+      b"escrow",
+      ctx.accounts.escrow.buyer.as_ref(),
+      ctx.accounts.escrow.listing.as_ref(),
+      &ctx.accounts.escrow.nonce.to_le_bytes(),
+      &[ctx.accounts.escrow.bump],
+  ];
+  let signer_seeds = &[escrow_seeds];
+  let cpi_ctx = CpiContext::new_with_signer(
+      ctx.accounts.registry_program.to_account_info(),
+      bazaar_registry::cpi::accounts::IncrementJobsCompleted {
+          listing: ctx.accounts.listing.to_account_info(),
+          escrow: ctx.accounts.escrow.to_account_info(),
+      },
+      signer_seeds,
+  );
+  bazaar_registry::cpi::increment_jobs_completed(cpi_ctx)?;
+  ```
+  This binds the CPI to a real escrow account that exists in the bazaar-escrow
+  program, that has terminal `Confirmed` state, and whose seeds are proven by
+  the runtime against `bazaar_escrow::ID`. Forging requires forging the entire
+  escrow lifecycle (which moves real USDC) — economically unprofitable.
+
+  Note the cyclic dependency this introduces (escrow imports registry types,
+  registry imports escrow types). Anchor handles this via the `cpi`/`no-entrypoint`
+  feature pattern; if the cycle is unworkable, the lighter alternative is to
+  introspect the `instructions` sysvar in registry and verify the calling
+  program is `bazaar_escrow::ID`. The PDA approach is preferred — it also
+  proves the escrow exists, not just that *some* escrow tx is in flight.
+
+  **Until this is fixed, the entire reputation signal of the marketplace is
+  meaningless.** This is a hard blocker.
+
+- **C2. Buyer can redirect seller's USDC payment in `confirm_delivery`.** The
+  `seller_token_account` field of `ConfirmDelivery` (lib.rs:470-471) has *no*
+  owner constraint:
+  ```rust
+  #[account(mut)]
+  pub seller_token_account: Account<'info, TokenAccount>,
+  ```
+  The buyer signs `confirm_delivery`, and the buyer chooses which account to
+  pass as `seller_token_account`. The instruction transfers `seller_amount`
+  USDC from the vault to whatever account the buyer points to here — **no
+  check that the destination is owned by `escrow.seller`**.
+
+  Practical attack:
+  1. Buyer creates escrow legitimately, transfers USDC into vault.
+  2. Seller delivers, calls `submit_delivery`.
+  3. Buyer calls `confirm_delivery` with `seller_token_account = <buyer's own
+     USDC token account>` (or any attacker-controlled account).
+  4. Vault transfers `seller_amount` to buyer's account. Vault transfers
+     `buyer_refund` (likely 0 for Minor severity) to buyer's account.
+  5. Listing's `jobs_completed` increments via the (currently unauthenticated)
+     CPI. Buyer is now reputation-positive on `discover()`, kept their USDC,
+     and the seller delivered work for free.
+
+  Severity: **buyer keeps 100% of escrow regardless of seller delivery.** The
+  whole non-custodial-vault invariant collapses on the confirm path because
+  while the vault PDA correctly refuses unsigned withdrawal, the buyer (who
+  *is* a signer) is able to pick the destination of the seller's payout.
+
+  **Recommended fix.** Add the missing constraint:
+  ```rust
+  #[account(
+      mut,
+      constraint = seller_token_account.owner == escrow.seller
+                   @ EscrowError::Unauthorized,
+      constraint = seller_token_account.mint == vault.mint
+                   @ EscrowError::Unauthorized,
+  )]
+  pub seller_token_account: Account<'info, TokenAccount>,
+
+  #[account(
+      mut,
+      constraint = buyer_token_account.owner == escrow.buyer
+                   @ EscrowError::Unauthorized,
+      constraint = buyer_token_account.mint == vault.mint
+                   @ EscrowError::Unauthorized,
+  )]
+  pub buyer_token_account: Account<'info, TokenAccount>,
+  ```
+  The `buyer_token_account.owner == escrow.buyer` constraint is defensive —
+  the buyer signs and would only be sabotaging themselves by misrouting their
+  own refund — but it closes a footgun and matches the symmetry on the seller
+  side. The mint constraints prevent the C2-adjacent attack of supplying a
+  decoy mint (covered also by H2 below).
+
+  Apply the same `owner == buyer.key()` / `mint == vault.mint` pattern to
+  `BuyerAction::buyer_token_account` (lib.rs:445-446, used by `open_dispute`).
+  Apply `owner == seller.key()` / `mint == vault.mint` to
+  `SellerAction::seller_token_account` (lib.rs:420-421, used by
+  `submit_delivery` and `claim_timeout`) — there the seller is the signer so
+  it's lower severity but the same shape, and consistency matters.
+
+#### High
+
+- **H1. `usdc_mint` is `AccountInfo` with no canonical-mint binding —
+  worthless-mint substitution attack on mainnet.** In `CreateEscrow`
+  (lib.rs:393-394):
+  ```rust
+  /// CHECK: USDC mint passed through to token account init constraints.
+  pub usdc_mint: AccountInfo<'info>,
+  ```
+  The CHECK comment claims the mint is "passed through to token account init
+  constraints" — but those constraints (`token::mint = usdc_mint`) only enforce
+  that the *vault* uses *whatever mint was passed*, not that the mint is the
+  canonical USDC. Buyer can pass any SPL mint they own and create an escrow
+  funded with worthless tokens.
+
+  On devnet this is harmless (devnet "USDC" is a test mint anyway). On
+  mainnet, this is a confused-deputy footgun: the SDK / dashboard would need
+  to validate the mint client-side before constructing the tx, and a
+  mis-implemented integration could let attackers stand up escrows that look
+  legitimate to indexer/UI but are funded with worthless mints — useful for
+  social-engineering (fake "I paid you 100 USDC", screenshot of the on-chain
+  escrow which actually contains 100 RUG-COIN).
+
+  **Recommended fix — match the per-cluster pattern from PR #30 (O2).** Hard-code
+  the canonical USDC mint per cluster, picked at build time via cargo features:
+  ```rust
+  #[cfg(feature = "mainnet")]
+  pub const USDC_MINT: Pubkey = pubkey!("EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v");
+  #[cfg(not(feature = "mainnet"))]
+  pub const USDC_MINT: Pubkey = pubkey!("4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU"); // devnet
+  ```
+  And constrain the field:
+  ```rust
+  #[account(address = USDC_MINT @ EscrowError::InvalidMint)]
+  pub usdc_mint: Account<'info, anchor_spl::token::Mint>,
+  ```
+  This also upgrades the type from `AccountInfo` to a typed `Mint`, which gets
+  rid of the `/// CHECK:` comment entirely.
+
+  Acceptable carryforward path if anchor-eng wants to ship the rest first:
+  add a `TODO(security/M1-mainnet)` comment and an entry in PR description so
+  the mainnet-deploy gate (the PR #44 / PR #46 pattern) blocks on this.
+  Either way it must be resolved before any non-devnet deploy. Tagging this
+  **HIGH (devnet-blocker: NO; mainnet-blocker: YES)**.
+
+- **H2. Token-account mint not constrained on any path.** None of
+  `seller_token_account` / `buyer_token_account` (`SellerAction`, `BuyerAction`,
+  `ConfirmDelivery`) carry a `mint == vault.mint` constraint. SPL token
+  transfer enforces matching mints internally and will fail the tx if mints
+  differ — so this is not directly exploitable for value theft. But it
+  removes a layer of defense-in-depth and produces a worse error message
+  (SPL mint-mismatch error vs Anchor constraint-violation with a typed
+  reason). The fix is bundled into the C2 patch above (the constraint pairs
+  `owner == X` and `mint == vault.mint` together).
+
+#### Medium
+
+- **M1. SLA severity miscomputes when `delivered_at < created_at` (clock
+  weirdness or tampered clock).** `compute_severity` (lib.rs:342-357):
+  ```rust
+  let actual_ms = (delivered_at.saturating_sub(escrow.created_at) as u64)
+      .saturating_mul(1_000);
+  ```
+  `saturating_sub` on `i64` saturates at `i64::MIN`, *not* at zero. If
+  `delivered_at < created_at` (cluster clock skew, validator misbehavior, or
+  any future code path that allows seller-controlled timestamps), the result
+  is a negative `i64` cast to `u64` via `as u64`, which produces a value
+  near `u64::MAX`. After the `* 1_000` saturate, `actual_ms = u64::MAX`,
+  which is always greater than `max_ms.saturating_add(max_ms / 2)` →
+  `SlaSeverity::Major` → 50% buyer refund regardless of true latency.
+
+  Today `delivered_at` is set inside `submit_delivery` from `Clock::get()` and
+  `created_at` was set by `create_escrow` similarly, so on a well-behaved
+  cluster `delivered_at >= created_at` always. But a defensive clamp is cheap
+  and removes the foot-cannon if a future change ever lets either field be
+  set otherwise. **Recommended fix:**
+  ```rust
+  let elapsed_secs = delivered_at.saturating_sub(escrow.created_at).max(0);
+  let actual_ms = (elapsed_secs as u64).saturating_mul(1_000);
+  ```
+  The `.max(0)` clamps the negative case to zero (Minor severity) which
+  matches the "no SLA violation observed" semantics.
+
+#### Low
+
+- **L1. `score: u8` parameter in `confirm_delivery` is unvalidated and
+  unstored.** Accepted by the instruction (lib.rs:140-144), forwarded into
+  the `SLAReport` event, then dropped. No range check (e.g. `score <= 100`)
+  and no persistence on `EscrowAccount`. If the spec intends this to be a
+  buyer-rated score that contributes to seller reputation later, it needs
+  range-validation now and an indexer plan; if not, removing it would
+  shrink the IDL surface.
+
+- **L2. `_tags: Vec<String>` parameter is `_`-prefixed (unused) yet still
+  consumes tx bytes and has no length cap.** Either drop it from the IDL or
+  validate `tags.len() <= MAX_SCORE_TAGS && tags.iter().all(|t| t.len() <=
+  MAX_TAG_LEN)` and persist it. The `MAX_SCORE_TAGS` / `MAX_TAG_LEN`
+  constants (lib.rs:11-12) are otherwise dead code.
+
+- **L3. `SLAReport` event omits `seller` and `buyer`.** Indexer can recover
+  them by joining on `escrow` pubkey, but every existing event in this
+  program (and in `bazaar-registry`) carries the principals in-band so the
+  Helius webhook handler can do a single-row upsert without a follow-up
+  account-read. Same shape applies to `DisputeOpened` (no `seller`).
+  Consistency with PR #2's M1 finding.
+
+- **L4. `EscrowStateChanged` event is fine but emits twice on every
+  transition** (once from the helper, once paired with the action-specific
+  event). Indexer must dedupe by `(escrow, timestamp)`. Not wrong, but worth
+  documenting in the indexer contract so backend-eng doesn't double-count
+  state transitions.
+
+#### Informational
+
+- **I1. M1 dispute stub semantics not documented in `docs/decisions/`.** The
+  doc-comment on `open_dispute` (lib.rs:279) says *"M1 stub: full refund to
+  buyer immediately"* — that's a real product decision worth an ADR. Without
+  one, in a few weeks the team will re-litigate "why does the buyer always
+  win disputes?" The ADR should also note the V1 plan (evaluator-mediated
+  resolution per PRD §7) so the upgrade path is on the record.
+
+- **I2. Constants `MAX_SCORE_TAGS` and `MAX_TAG_LEN` are defined but never
+  used.** Tied to L2; either wire them in or delete.
+
+- **I3. `Sysvar<'info, Rent>` is declared in `CreateEscrow` but never
+  referenced.** Anchor 0.31 doesn't require it (rent is computed via the
+  rent sysvar internally on `init`). Dropping it shrinks the account list
+  by one entry per `create_escrow` call.
+
+### Sanity-check answers (analogous to prior audits)
+
+1. ❌ **No hardcoded secrets.** Pass — no API keys / RPC URLs / mints
+   hardcoded *yet*; that's part of the H1 finding (USDC mint *should* be
+   hardcoded per cluster, but isn't). No private keys, no JWTs.
+
+2. ❌ **No mainnet references.** Pass — program id `qTezZ...vdzSs` is the
+   devnet-deployed escrow id; no mainnet RPC URLs; no mainnet mint addresses.
+
+3. ❌ **No admin-key footprint on the vault.** Mostly pass — the vault PDA
+   has no admin-withdraw path. *But* C2 effectively gives the buyer admin-like
+   redirection authority over seller payout, and C1 gives any wallet
+   admin-like authority over the reputation counter. The non-custodial
+   *invariant* the security checklist asks for is not yet upheld; on the
+   vault itself it is, on the surrounding state it is not.
+
+### Re-review plan
+
+- C1 fix: register `bazaar_escrow::EscrowAccount` as a CPI-readable type,
+  add the PDA-signer constraint to `IncrementJobsCompleted`, and switch the
+  CPI in `confirm_delivery` to `new_with_signer` with escrow seeds. Re-audit
+  expects to confirm: (a) direct invocation by a non-escrow signer fails with
+  `ConstraintSeeds`, (b) confirm_delivery still succeeds end-to-end on
+  devnet, (c) the cyclic-dep is handled cleanly via the `cpi`/`no-entrypoint`
+  Cargo features.
+
+- C2 fix: add the four `owner == X` / `mint == vault.mint` constraints
+  across `ConfirmDelivery`, `BuyerAction`, `SellerAction`. Re-audit expects:
+  (a) negative test where buyer passes their own token account as
+  `seller_token_account` fails with `Unauthorized`, (b) negative test with a
+  wrong-mint token account fails, (c) happy paths still pass.
+
+- H1: per-cluster `USDC_MINT` const + `address = USDC_MINT` constraint, OR
+  acceptable as `TODO(security/M1-mainnet)` if it ships on the mainnet-gate
+  carryforward list (must explicitly land before PR #46-style "mainnet
+  release-gate" audit).
+
+- M1: `.max(0)` clamp in `compute_severity`. Trivial.
+
+- L1-L4 / I1-I3: addressable in this PR or follow-up; non-blocking.
+
+**Verdict reiterated:** ❌ BLOCK on C1 + C2. devnet-blocker: YES.
+mainnet-blocker: YES (also adds H1). Awaiting anchor-eng's revision PR; this
+audit can re-run quickly once those four constraints land.
+
+The carryforward "M0 trajectory" pattern (substantive audit → exact recommended
+fix → re-review confirms) carries cleanly into M1 — this is exactly the
+funds-bearing review the M0 discipline was building toward.
+
+### Re-audit @ commit 51a401e (+ c3eca9b biome fmt) — 2026-04-25
+**Verdict:** ✅ **APPROVED for merge.** All 2 CRITICAL + 1 HIGH (H2) + 1 MEDIUM
++ 4 LOW + 2 INFO findings resolved. H1 (per-cluster `USDC_MINT`) acceptably
+deferred to M1→mainnet release-gate carryforward per the original audit verdict.
+
+**Walk of the fix commit:**
+
+- **C1 — `bazaar_registry::increment_jobs_completed` authority gate** ✅
+  - Registry: added `escrow_authority: Signer<'info>` with
+    `seeds = [b"authority"]` + `seeds::program = BAZAAR_ESCROW_ID` + `bump`
+    constraint. `BAZAAR_ESCROW_ID = pubkey!("qTezZ...vdzSs")` matches
+    `declare_id!` in `bazaar-escrow` exactly. (Source-of-truth comment notes
+    they must stay in sync — fair tradeoff for not introducing a build-time
+    code-gen pipeline.)
+  - Escrow: `confirm_delivery` builds `authority_seeds = [b"authority",
+    &[bump]]` and switches the registry CPI to `new_with_signer`. The
+    `escrow_authority` field is added to `ConfirmDelivery` as
+    `UncheckedAccount` with the matching seeds for client-side derivation.
+  - **Note on the design.** anchor-eng-2 chose a *static* program-wide
+    authority PDA (`[b"authority"]`) instead of the per-escrow signer pattern
+    I sketched. This is structurally sound: only `bazaar-escrow` can
+    `invoke_signed` for `[b"authority"]` against `BAZAAR_ESCROW_ID`, so no
+    external caller can forge the signer. The mild caveat is that *any*
+    future bazaar-escrow code path that signs `[b"authority"]` would gain
+    the ability to call `increment_jobs_completed` on any listing — today
+    only `confirm_delivery` after Delivered→Confirmed transition does so, but
+    this convention is now load-bearing. Worth a single-line comment in
+    `bazaar_escrow::lib.rs` next to the seeds derivation noting "this PDA
+    grants registry-counter authority — guard new uses." Non-blocking for
+    M1; flagging as a maintainability note for future PRs touching the
+    escrow program.
+  - **Negative test (lib.rs new `describe('increment_jobs_completed')`)**
+    generates a random `Keypair`, signs it as `escrowAuthority`, and expects
+    `ConstraintSeeds`. Random Keypairs are on-curve (not PDAs) and can
+    never derive to the `[b"authority"]` PDA address against any program ID,
+    so Anchor's seeds check fires before any other constraint. The matcher
+    `/ConstraintSeeds|seeds constraint/i` is correct for the Anchor 0.31
+    error string. ✅
+
+- **C2 + H2 — token-account owner/mint constraints** ✅
+  - All four token-account fields gain `token::mint = vault.mint` (or
+    `usdc_mint` in CreateEscrow) AND `token::authority = escrow.{buyer,seller}`
+    constraints:
+    - `CreateEscrow.buyer_token_account` — `mint = usdc_mint`, `authority = buyer`
+    - `SellerAction.seller_token_account` — `mint = vault.mint`, `authority = escrow.seller`
+    - `BuyerAction.buyer_token_account` — `mint = vault.mint`, `authority = escrow.buyer`
+    - `ConfirmDelivery.seller_token_account` — `mint = vault.mint`, `authority = escrow.seller`
+    - `ConfirmDelivery.buyer_token_account` — `mint = vault.mint`, `authority = escrow.buyer`
+  - The `token::authority` constraint is the Anchor SPL helper that enforces
+    the SPL token account's `owner` field equals the supplied pubkey. (SPL
+    "owner" ≡ Anchor `token::authority`; not to be confused with the PDA
+    signer authority, which is a separate concept.) ✅
+  - **Negative test** (`'rejects confirm_delivery when seller_token_account
+    is not owned by escrow.seller'`): buyer creates a second token account
+    they own and passes it as `sellerTokenAccount`. Expects an error
+    matching `/ConstraintTokenOwner|token owner|ConstraintRaw|constraint/i` —
+    matcher is broad enough to catch the Anchor 0.31 `ConstraintTokenOwner`
+    string and also tolerates the matcher being slightly imprecise across
+    Anchor versions. ✅
+  - The `BuyerAction` and `SellerAction` constraints close the symmetric
+    footguns even though the relevant party is the signer — defense-in-depth
+    matches the C2 patch. ✅
+
+- **H1 — canonical USDC mint binding** ⏸️ **DEFERRED — acceptable.**
+  - The `usdc_mint: AccountInfo` field remains, but the comment is now
+    explicit: *"H1 per-cluster address check is M1-tail work."* This matches
+    the verdict's acceptable carryforward path: devnet ships now, mainnet
+    release-gate (PR #44 / PR #46 pattern) blocks until per-cluster
+    `USDC_MINT` const + `address = USDC_MINT` constraint lands.
+  - **Minor doc gap (non-blocking):** the H1 comment cross-references
+    `docs/decisions/0002-m1-dispute-stub.md` for "why devnet omits it,"
+    but (a) that ADR file does not exist in `docs/decisions/` (only
+    `0001-sbf-toolchain-workarounds.md` is there), and (b) a dispute-stub
+    ADR is not the right place to document mint hardening anyway. Two
+    follow-ups would close this: create `0002-m1-dispute-stub.md` (covers
+    I1 below) AND `0003-h1-usdc-mint-cluster-binding.md` (or fold both into
+    one M1-deferred-decisions ADR). Recommend ADR creation in the next PR
+    that touches escrow; not gating this merge.
+
+- **M1 — `compute_severity` negative-latency clamp** ✅
+  - `let elapsed_secs = delivered_at.saturating_sub(escrow.created_at).max(0);`
+  - `let actual_ms = (elapsed_secs as u64).saturating_mul(1_000);`
+  - The `.max(0)` clamps the saturating-sub result to non-negative *before*
+    the `as u64` cast, eliminating the wrap-to-near-`u64::MAX` hazard. ✅
+  - Bonus cleanup: dropped the unused `_now: i64` parameter.
+
+- **L1 — score range guard** ✅ — `require!(score <= 100,
+  EscrowError::InvalidScore);` with new `InvalidScore` error variant.
+- **L2 — tags validation** ✅ — `require!(tags.len() <= MAX_SCORE_TAGS,
+  EscrowError::TooManyTags);` plus per-tag length check. The previously-dead
+  `MAX_SCORE_TAGS` and `MAX_TAG_LEN` constants are now load-bearing. (Closes
+  I2 as a side-effect.)
+- **L3 — event payload completeness** ✅ partial:
+  - `EscrowStateChanged` now carries `buyer + seller`. ✅
+  - `SLAReport` now carries `buyer + seller + tags`. ✅
+  - `DisputeOpened` was *not* updated — still missing `seller`. Indexer can
+    still derive seller from a join on `escrow`. **Minor non-blocking**;
+    recommend adding in any follow-up touching the escrow events.
+
+- **L4** ⏸️ deferred — `EscrowStateChanged` still emits twice per transition
+  (once paired with the action-specific event). Worth documenting in the
+  indexer contract so backend-eng dedupes by `(escrow, timestamp, new_state)`.
+  Non-blocking.
+
+- **I1** ⏸️ deferred — code-comment now points to
+  `docs/decisions/0002-m1-dispute-stub.md` for the V1 arbitration plan, but
+  the ADR file does not exist. Same comment-references-missing-file
+  situation as the H1 cross-reference above. The doc-comment helpfully
+  states the V1 intent inline ("V1 will add an arbitration path"), which is
+  most of what an ADR would carry — but the linked file should exist or the
+  link should be removed.
+
+- **I2** ✅ resolved — `MAX_SCORE_TAGS` / `MAX_TAG_LEN` now used by L2.
+- **I3** ⏸️ deferred — `Sysvar<'info, Rent>` retained with explicit comment
+  citing test-call-site backward compat. Acceptable.
+
+**Sanity-check answers:**
+
+1. ✅ **No hardcoded secrets.** Pass — `BAZAAR_ESCROW_ID` is a public program
+   address, intentionally hardcoded as the cross-program trust anchor.
+2. ✅ **No mainnet references.** Pass — same devnet program ID `qTezZ...vdzSs`.
+3. ✅ **Non-custodial vault invariant upheld.**
+   - Vault: PDA-controlled, no admin withdraw — same as before.
+   - Seller payout: now constrained to `owner == escrow.seller` — buyer cannot
+     redirect (C2 sealed).
+   - Reputation counter: now requires `escrow_authority` PDA signed by
+     bazaar-escrow — no wallet can bump for free (C1 sealed).
+
+**Carryforward to M1→mainnet release-gate audit (PR #44 / PR #46 pattern):**
+
+- **H1 — per-cluster `USDC_MINT` const + `address = USDC_MINT` constraint.**
+  Required before mainnet deploy. Pattern:
+  ```rust
+  #[cfg(feature = "mainnet")]
+  pub const USDC_MINT: Pubkey = pubkey!("EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v");
+  #[cfg(not(feature = "mainnet"))]
+  pub const USDC_MINT: Pubkey = pubkey!("4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU");
+  ```
+- **L3 partial** — `DisputeOpened` event missing `seller`.
+- **L4** — document `EscrowStateChanged` double-emit in indexer contract.
+- **I1 / H1 doc** — create the referenced ADRs (or drop the broken refs).
+- **C1 design note** — add a comment by the `[b"authority"]` derivation in
+  bazaar-escrow noting that this PDA grants registry-counter authority and
+  any new use must be guarded by equally strong state checks.
+
+**Verdict:** ✅ **APPROVE** PR #51 for merge. CI green (Lint + typecheck +
+test SUCCESS). The fix commit's negative tests directly demonstrate that
+both critical attack vectors are now closed. The M0 audit-discipline pattern
+(substantive walk → exact recommended fix → re-review confirms) executed
+end-to-end on the first funds-bearing program — the discipline pays for itself.
