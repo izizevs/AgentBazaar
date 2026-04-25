@@ -46,7 +46,6 @@ describe('AgentBazaar stubs', () => {
         sla: {},
         endpoint: 'https://example.com',
       }),
-    () => client.discover({}),
     () => client.hire('agentId', { budget: 1_000_000n, sla: {}, timeout: 3600 }),
     () => client.deliver('escrowId', { resultUri: 'ipfs://x', resultHash: new Uint8Array(32) }),
     () => client.confirm('escrowId', { score: 90 }),

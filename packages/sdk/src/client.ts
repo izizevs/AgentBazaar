@@ -4,6 +4,7 @@ import {
   type Transaction,
   type VersionedTransaction,
 } from '@solana/web3.js';
+import { discoverServices } from './discover.js';
 import { NotImplementedError } from './errors.js';
 import { registerService } from './register.js';
 import type {
@@ -35,18 +36,23 @@ export interface AgentBazaarConfig {
   rpc: string | Connection;
   /** Pinata JWT for IPFS metadata uploads (required for register()). */
   pinataJwt?: string;
+  /** Discovery API base URL. Defaults to DISCOVERY_API_URL env var or localhost:8787. */
+  discoveryApiUrl?: string;
 }
 
 export class AgentBazaar {
   readonly connection: Connection;
   readonly wallet: AnchorWallet;
+  readonly discoveryApiUrl: string;
   // Private: prevents accidental exposure via JSON.stringify(client) or error-capture tooling.
   readonly #pinataJwt: string | undefined;
 
-  constructor({ wallet, rpc, pinataJwt }: AgentBazaarConfig) {
+  constructor({ wallet, rpc, pinataJwt, discoveryApiUrl }: AgentBazaarConfig) {
     this.wallet = wallet;
     this.connection = typeof rpc === 'string' ? new Connection(rpc, 'confirmed') : rpc;
     this.#pinataJwt = pinataJwt;
+    this.discoveryApiUrl =
+      discoveryApiUrl ?? process.env.DISCOVERY_API_URL ?? 'http://localhost:8787';
   }
 
   /**
@@ -71,8 +77,8 @@ export class AgentBazaar {
    * Discover available service providers.
    * Falls back to direct RPC if the Discovery API indexer is unreachable.
    */
-  async discover(_input: DiscoverInput): Promise<ServiceProvider[]> {
-    throw new NotImplementedError('discover');
+  async discover(input: DiscoverInput): Promise<ServiceProvider[]> {
+    return discoverServices(this.connection, this.wallet, input, this.discoveryApiUrl);
   }
 
   /**

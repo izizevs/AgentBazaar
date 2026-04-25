@@ -34,3 +34,9 @@ export class MetadataUploadError extends AgentBazaarError {}
 
 /** Thrown when a register() call finds an already-active listing for the same capability. */
 export class DuplicateListingError extends AgentBazaarError {}
+
+/** Thrown when the Discovery API is unreachable or returns a non-2xx response. */
+export class DiscoveryAPIError extends AgentBazaarError {}
+
+/** Thrown when the Discovery API fails and the RPC fallback also fails. */
+export class RPCFallbackFailedError extends AgentBazaarError {}

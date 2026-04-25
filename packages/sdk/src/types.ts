@@ -53,8 +53,10 @@ export interface DiscoverInput {
   maxPrice?: bigint;
   /** Maximum SLA latency in milliseconds. */
   maxLatency?: number;
-  /** Sort field. Defaults to 'reputation'. */
-  sort?: 'price' | 'reputation' | 'latency';
+  /** Sort order. */
+  sort?: 'price_asc' | 'reputation_desc' | 'latency_asc';
+  /** Maximum results (1–200, default 50). */
+  limit?: number;
 }
 
 export interface ServiceProvider {
