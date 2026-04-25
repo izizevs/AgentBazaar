@@ -15,6 +15,13 @@
       "when": 1777117384221,
       "tag": "0001_mean_landau",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1777118889259,
+      "tag": "0002_eminent_midnight",
+      "breakpoints": true
     }
   ]
 }

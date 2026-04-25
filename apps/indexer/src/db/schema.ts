@@ -12,6 +12,13 @@ import {
   timestamp,
 } from 'drizzle-orm/pg-core';
 
+// Replay dedup: one row per processed Solana tx signature.
+// INSERT ON CONFLICT DO NOTHING gives idempotent webhook delivery.
+export const processedSignatures = pgTable('processed_signatures', {
+  signature: text('signature').primaryKey(),
+  processedAt: timestamp('processed_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
 // PostgreSQL bytea for the 32-byte on-chain capabilityHash field.
 // Stored as bytea (not hex text) so the DB can do exact-byte equality
 // lookups without decoding — supports capability_hash memcmp filtering

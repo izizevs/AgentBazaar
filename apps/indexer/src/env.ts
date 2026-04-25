@@ -10,7 +10,8 @@ const EnvSchema = z.object({
   PORT: z.coerce.number().int().positive().default(3001),
   DATABASE_URL: z.string().url(),
   HELIUS_API_KEY: z.string().min(1).optional(),
-  HELIUS_WEBHOOK_SECRET: z.string().min(1).optional(),
+  // Required: indexer rejects all webhook requests when missing (fails closed).
+  HELIUS_WEBHOOK_SECRET: z.string().min(1),
 });
 
 type Env = z.infer<typeof EnvSchema>;
