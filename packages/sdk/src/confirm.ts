@@ -48,13 +48,14 @@ export async function confirmDelivery(
   const sellerTokenAccount = getAssociatedTokenAddress(usdcMint, escrow.seller as PublicKey);
   const buyerTokenAccount = getAssociatedTokenAddress(usdcMint, wallet.publicKey);
 
-  // biome-ignore lint/suspicious/noExplicitAny: escrow PDA has self-referential seeds; Anchor TS cannot statically resolve it — must be passed explicitly
-  const accts = {
+  const acctsTmp = {
     escrow: escrowPda,
     sellerTokenAccount,
     buyerTokenAccount,
     listing: escrow.listing as PublicKey,
-  } as any;
+  };
+  // biome-ignore lint/suspicious/noExplicitAny: escrow PDA has self-referential seeds; Anchor TS cannot statically resolve it — must be passed explicitly
+  const accts = acctsTmp as any;
   const ix = await program.methods
     .confirmDelivery(input.score, input.tags ?? [])
     .accounts(accts)

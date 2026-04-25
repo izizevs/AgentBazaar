@@ -1,4 +1,5 @@
 import { createHash, randomBytes } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 import type { Program } from '@coral-xyz/anchor';
 import * as anchor from '@coral-xyz/anchor';
 import { createAccount, createMint, getAccount, mintTo, TOKEN_PROGRAM_ID } from '@solana/spl-token';
@@ -219,15 +220,22 @@ describe('bazaar-escrow', () => {
   before(async () => {
     escrowEventAuthority = eventAuthorityPda(escrowProgram.programId);
     registryEventAuthority = eventAuthorityPda(registryProgram.programId);
-    // Shared USDC test mint — one per test run
     mintAuthority = Keypair.generate();
     await fund(connection, mintAuthority.publicKey, 5);
+    // Load the deterministic test USDC mint keypair from fixtures so its address
+    // matches the USDC_MINT constant compiled with the `testing` cargo feature.
+    const mintKp = Keypair.fromSecretKey(
+      Uint8Array.from(
+        JSON.parse(readFileSync('./tests/fixtures/test-usdc-mint.json', 'utf8')) as number[],
+      ),
+    );
     usdcMint = await createMint(
       connection,
       mintAuthority,
       mintAuthority.publicKey,
       null,
       USDC_DECIMALS,
+      mintKp,
     );
   });
 
@@ -255,6 +263,78 @@ describe('bazaar-escrow', () => {
 
       const buyerAcct = await getAccount(connection, buyerTokenAccount);
       expect(Number(buyerAcct.amount)).to.equal(ONE_USDC); // only leftover
+    });
+
+    it('rejects create_escrow with wrong USDC mint (ConstraintAddress)', async () => {
+      const badMintKp = Keypair.generate();
+      const buyer = Keypair.generate();
+      const seller = Keypair.generate();
+      await fund(connection, buyer.publicKey, 5);
+      await fund(connection, seller.publicKey, 2);
+
+      const fakeMint = await createMint(
+        connection,
+        mintAuthority,
+        mintAuthority.publicKey,
+        null,
+        USDC_DECIMALS,
+        badMintKp,
+      );
+
+      const capHash = hashCapability(`ai.badmint.${randomBytes(4).toString('hex')}`);
+      const listing = listingPda(registryProgram.programId, seller.publicKey, capHash);
+      await registryProgram.methods
+        .registerService(
+          [...capHash],
+          new BN(1),
+          new BN(0),
+          0,
+          {
+            maxLatencyMs: null,
+            minUptimePct: null,
+            responseFormat: null,
+            jsonSchemaUri: null,
+            customParams: [],
+          },
+          'ipfs://Qmbad',
+        )
+        .accounts({
+          owner: seller.publicKey,
+          listing,
+          systemProgram: SystemProgram.programId,
+          eventAuthority: registryEventAuthority,
+          program: registryProgram.programId,
+        } as any)
+        .signers([seller])
+        .rpc();
+
+      const nonce = new BN(Date.now());
+      const escrow = escrowPda(escrowProgram.programId, buyer.publicKey, listing, nonce);
+      const vault = vaultPda(escrowProgram.programId, escrow);
+      const buyerTokenAccount = await createAccount(connection, buyer, fakeMint, buyer.publicKey);
+
+      try {
+        await escrowProgram.methods
+          .createEscrow(new BN(ONE_USDC), null, null, new BN(3600), nonce)
+          .accounts({
+            buyer: buyer.publicKey,
+            listing,
+            escrow,
+            vault,
+            buyerTokenAccount,
+            usdcMint: fakeMint,
+            tokenProgram: TOKEN_PROGRAM_ID,
+            systemProgram: SystemProgram.programId,
+            rent: SYSVAR_RENT_PUBKEY,
+            eventAuthority: escrowEventAuthority,
+            program: escrowProgram.programId,
+          } as any)
+          .signers([buyer])
+          .rpc();
+        expect.fail('expected ConstraintAddress');
+      } catch (err: any) {
+        expect(err.toString()).to.match(/ConstraintAddress/);
+      }
     });
 
     it('rejects zero amount', async () => {
@@ -342,6 +422,7 @@ describe('bazaar-escrow', () => {
           escrow,
           vault,
           sellerTokenAccount,
+          usdcMint,
           tokenProgram: TOKEN_PROGRAM_ID,
           eventAuthority: escrowEventAuthority,
           program: escrowProgram.programId,
@@ -374,6 +455,7 @@ describe('bazaar-escrow', () => {
             escrow,
             vault,
             sellerTokenAccount: outsiderToken,
+            usdcMint,
             tokenProgram: TOKEN_PROGRAM_ID,
             eventAuthority: escrowEventAuthority,
             program: escrowProgram.programId,
@@ -409,6 +491,7 @@ describe('bazaar-escrow', () => {
           escrow: f.escrow,
           vault: f.vault,
           sellerTokenAccount: f.sellerTokenAccount,
+          usdcMint,
           tokenProgram: TOKEN_PROGRAM_ID,
           eventAuthority: escrowEventAuthority,
           program: escrowProgram.programId,
@@ -431,6 +514,7 @@ describe('bazaar-escrow', () => {
           vault: f.vault,
           sellerTokenAccount: f.sellerTokenAccount,
           buyerTokenAccount: f.buyerTokenAccount,
+          usdcMint,
           listing: f.listing,
           registryProgram: registryProgram.programId,
           escrowAuthority,
@@ -465,6 +549,7 @@ describe('bazaar-escrow', () => {
           vault: f.vault,
           sellerTokenAccount: f.sellerTokenAccount,
           buyerTokenAccount: f.buyerTokenAccount,
+          usdcMint,
           listing: f.listing,
           registryProgram: registryProgram.programId,
           escrowAuthority,
@@ -500,6 +585,7 @@ describe('bazaar-escrow', () => {
           vault: f.vault,
           sellerTokenAccount: f.sellerTokenAccount,
           buyerTokenAccount: f.buyerTokenAccount,
+          usdcMint,
           listing: f.listing,
           registryProgram: registryProgram.programId,
           escrowAuthority,
@@ -530,6 +616,7 @@ describe('bazaar-escrow', () => {
           vault: f.vault,
           sellerTokenAccount: f.sellerTokenAccount,
           buyerTokenAccount: f.buyerTokenAccount,
+          usdcMint,
           listing: f.listing,
           registryProgram: registryProgram.programId,
           escrowAuthority,
@@ -560,6 +647,7 @@ describe('bazaar-escrow', () => {
             vault: f.vault,
             sellerTokenAccount: f.sellerTokenAccount,
             buyerTokenAccount: outsiderToken,
+            usdcMint,
             listing: f.listing,
             registryProgram: registryProgram.programId,
             escrowAuthority,
@@ -593,6 +681,7 @@ describe('bazaar-escrow', () => {
             vault: f.vault,
             sellerTokenAccount: attackerToken, // buyer's account, not seller's
             buyerTokenAccount: f.buyerTokenAccount,
+            usdcMint,
             listing: f.listing,
             registryProgram: registryProgram.programId,
             escrowAuthority,
@@ -619,6 +708,7 @@ describe('bazaar-escrow', () => {
         vault: f.vault,
         sellerTokenAccount: f.sellerTokenAccount,
         buyerTokenAccount: f.buyerTokenAccount,
+        usdcMint,
         listing: f.listing,
         registryProgram: registryProgram.programId,
         escrowAuthority,
@@ -718,6 +808,7 @@ describe('bazaar-escrow', () => {
           escrow: f.escrow,
           vault: f.vault,
           sellerTokenAccount: f.sellerTokenAccount,
+          usdcMint,
           tokenProgram: TOKEN_PROGRAM_ID,
           eventAuthority: escrowEventAuthority,
           program: escrowProgram.programId,
@@ -733,6 +824,7 @@ describe('bazaar-escrow', () => {
             escrow: f.escrow,
             vault: f.vault,
             sellerTokenAccount: f.sellerTokenAccount,
+            usdcMint,
             tokenProgram: TOKEN_PROGRAM_ID,
             eventAuthority: escrowEventAuthority,
             program: escrowProgram.programId,
@@ -763,6 +855,7 @@ describe('bazaar-escrow', () => {
             escrow: f.escrow,
             vault: f.vault,
             sellerTokenAccount: f.sellerTokenAccount,
+            usdcMint,
             tokenProgram: TOKEN_PROGRAM_ID,
             eventAuthority: escrowEventAuthority,
             program: escrowProgram.programId,
@@ -798,6 +891,7 @@ describe('bazaar-escrow', () => {
           escrow: f.escrow,
           vault: f.vault,
           buyerTokenAccount: f.buyerTokenAccount,
+          usdcMint,
           tokenProgram: TOKEN_PROGRAM_ID,
           eventAuthority: escrowEventAuthority,
           program: escrowProgram.programId,
@@ -827,6 +921,7 @@ describe('bazaar-escrow', () => {
           escrow: f.escrow,
           vault: f.vault,
           sellerTokenAccount: f.sellerTokenAccount,
+          usdcMint,
           tokenProgram: TOKEN_PROGRAM_ID,
           eventAuthority: escrowEventAuthority,
           program: escrowProgram.programId,
@@ -842,6 +937,7 @@ describe('bazaar-escrow', () => {
           escrow: f.escrow,
           vault: f.vault,
           buyerTokenAccount: f.buyerTokenAccount,
+          usdcMint,
           tokenProgram: TOKEN_PROGRAM_ID,
           eventAuthority: escrowEventAuthority,
           program: escrowProgram.programId,
@@ -873,6 +969,7 @@ describe('bazaar-escrow', () => {
             escrow: f.escrow,
             vault: f.vault,
             buyerTokenAccount: outsiderToken,
+            usdcMint,
             tokenProgram: TOKEN_PROGRAM_ID,
             eventAuthority: escrowEventAuthority,
             program: escrowProgram.programId,
@@ -902,6 +999,7 @@ describe('bazaar-escrow', () => {
           escrow: f.escrow,
           vault: f.vault,
           sellerTokenAccount: f.sellerTokenAccount,
+          usdcMint,
           tokenProgram: TOKEN_PROGRAM_ID,
           eventAuthority: escrowEventAuthority,
           program: escrowProgram.programId,
@@ -916,6 +1014,7 @@ describe('bazaar-escrow', () => {
           vault: f.vault,
           sellerTokenAccount: f.sellerTokenAccount,
           buyerTokenAccount: f.buyerTokenAccount,
+          usdcMint,
           listing: f.listing,
           registryProgram: registryProgram.programId,
           escrowAuthority,
@@ -934,6 +1033,7 @@ describe('bazaar-escrow', () => {
             escrow: f.escrow,
             vault: f.vault,
             buyerTokenAccount: f.buyerTokenAccount,
+            usdcMint,
             tokenProgram: TOKEN_PROGRAM_ID,
             eventAuthority: escrowEventAuthority,
             program: escrowProgram.programId,

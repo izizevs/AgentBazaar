@@ -14,7 +14,7 @@ license = "Apache-2.0"
 repository = "https://github.com/izizevs/AgentBazaar"
 
 [workspace.dependencies]
-anchor-lang = "0.31.1"
+anchor-lang = { version = "0.31.1", features = ["event-cpi"] }
 anchor-spl = "0.31.1"
 
 [profile.release]

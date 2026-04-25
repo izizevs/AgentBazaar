@@ -1,10 +1,21 @@
 use anchor_lang::prelude::*;
-use anchor_spl::token::{self, Token, TokenAccount, Transfer};
+use anchor_lang::solana_program::pubkey;
+use anchor_spl::token::{self, Mint, Token, TokenAccount, Transfer};
 use bazaar_registry::program::BazaarRegistry;
 use bazaar_registry::ServiceListing;
 use crate::program::BazaarEscrow;
 
 declare_id!("EhFptDs4mz6rt7HDmt8pB7ZogiqxUMVhpjB3NvToXxW2");
+
+// Per-cluster USDC mint binding — closes H1 audit finding from PR #51.
+// Production builds: `anchor build --no-default-features --features devnet` or
+// `anchor build --no-default-features` (mainnet). Tests use `default = ["testing"]`.
+#[cfg(feature = "devnet")]
+pub const USDC_MINT: Pubkey = pubkey!("4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU");
+#[cfg(feature = "testing")]
+pub const USDC_MINT: Pubkey = pubkey!("8VEVN5sJUzqN3ddkJV9gYMbLBnmAxUXsC5CDDU9WFwzE");
+#[cfg(not(any(feature = "devnet", feature = "testing")))]
+pub const USDC_MINT: Pubkey = pubkey!("EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v");
 
 pub const MAX_RESULT_URI: usize = 128;
 pub const MAX_REASON: usize = 128;
@@ -426,10 +437,8 @@ pub struct CreateEscrow<'info> {
     )]
     pub buyer_token_account: Account<'info, TokenAccount>,
 
-    /// CHECK: USDC mint — validated transitively via token::mint constraints on vault
-    /// and buyer_token_account. H1 per-cluster address check is M1-tail work
-    /// (see docs/decisions/0002-m1-dispute-stub.md for why devnet omits it).
-    pub usdc_mint: AccountInfo<'info>,
+    #[account(address = USDC_MINT)]
+    pub usdc_mint: Account<'info, Mint>,
 
     pub token_program: Program<'info, Token>,
     pub system_program: Program<'info, System>,
@@ -459,16 +468,20 @@ pub struct SellerAction<'info> {
         mut,
         seeds = [b"vault", escrow.key().as_ref()],
         bump = escrow.vault_bump,
+        token::mint = usdc_mint,
     )]
     pub vault: Account<'info, TokenAccount>,
 
     // C2+H2 fix: enforce mint match and owner is the escrow's recorded seller.
     #[account(
         mut,
-        token::mint = vault.mint,
+        token::mint = usdc_mint,
         token::authority = escrow.seller,
     )]
     pub seller_token_account: Account<'info, TokenAccount>,
+
+    #[account(address = USDC_MINT)]
+    pub usdc_mint: Account<'info, Mint>,
 
     pub token_program: Program<'info, Token>,
 
@@ -494,16 +507,20 @@ pub struct BuyerAction<'info> {
         mut,
         seeds = [b"vault", escrow.key().as_ref()],
         bump = escrow.vault_bump,
+        token::mint = usdc_mint,
     )]
     pub vault: Account<'info, TokenAccount>,
 
     // C2+H2 fix: enforce mint match and owner is the escrow's recorded buyer.
     #[account(
         mut,
-        token::mint = vault.mint,
+        token::mint = usdc_mint,
         token::authority = escrow.buyer,
     )]
     pub buyer_token_account: Account<'info, TokenAccount>,
+
+    #[account(address = USDC_MINT)]
+    pub usdc_mint: Account<'info, Mint>,
 
     pub token_program: Program<'info, Token>,
 
@@ -529,25 +546,29 @@ pub struct ConfirmDelivery<'info> {
         mut,
         seeds = [b"vault", escrow.key().as_ref()],
         bump = escrow.vault_bump,
+        token::mint = usdc_mint,
     )]
     pub vault: Account<'info, TokenAccount>,
 
     // C2+H2 fix: seller_token_account must be owned by the recorded seller
-    // and share the vault's mint — prevents buyer from redirecting the payout.
+    // and use the canonical USDC mint.
     #[account(
         mut,
-        token::mint = vault.mint,
+        token::mint = usdc_mint,
         token::authority = escrow.seller,
     )]
     pub seller_token_account: Account<'info, TokenAccount>,
 
-    // H2 fix: buyer refund account must also match vault mint and be buyer-owned.
+    // H2 fix: buyer refund account must also use canonical USDC mint and be buyer-owned.
     #[account(
         mut,
-        token::mint = vault.mint,
+        token::mint = usdc_mint,
         token::authority = escrow.buyer,
     )]
     pub buyer_token_account: Account<'info, TokenAccount>,
+
+    #[account(address = USDC_MINT)]
+    pub usdc_mint: Account<'info, Mint>,
 
     #[account(
         mut,
