@@ -1,6 +1,7 @@
 import { sql } from 'drizzle-orm';
 import {
   bigint,
+  bigserial,
   boolean,
   customType,
   index,
@@ -95,3 +96,54 @@ export const serviceListings = pgTable(
     index('idx_service_listings_discover').on(t.capabilityHash, t.isActive, t.priceLamports),
   ],
 );
+
+// EscrowState mirrors the on-chain enum variants from bazaar-escrow.
+export type EscrowState = 'created' | 'delivered' | 'confirmed' | 'disputed' | 'timeout_claimed';
+
+// Typed as unknown map until the bazaar-escrow IDL lands in Task #21.
+export type EscrowSlaParams = Record<string, unknown>;
+
+export const escrows = pgTable(
+  'escrows',
+  {
+    pubkey: text('pubkey').primaryKey(),
+    buyer: text('buyer').notNull(),
+    seller: text('seller').notNull(),
+    listing: text('listing').notNull(),
+    vault: text('vault').notNull(),
+    amountUsdc: bigint('amount_usdc', { mode: 'bigint' }).notNull(),
+    slaParams: jsonb('sla_params').$type<EscrowSlaParams>().notNull(),
+    state: text('state').$type<EscrowState>().notNull(),
+    resultUri: text('result_uri'),
+    resultHash: bytea('result_hash'),
+    deadline: timestamp('deadline', { withTimezone: true }).notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index('idx_escrows_seller_state').on(t.seller, t.state),
+    index('idx_escrows_buyer_state').on(t.buyer, t.state),
+  ],
+);
+
+export type SlaReportSeverity = 'minor' | 'moderate' | 'major';
+
+export const slaReports = pgTable(
+  'sla_reports',
+  {
+    id: bigserial('id', { mode: 'bigint' }).primaryKey(),
+    escrowPubkey: text('escrow_pubkey').notNull(),
+    severity: text('severity').$type<SlaReportSeverity>().notNull(),
+    refundPct: smallint('refund_pct').notNull(),
+    computedAt: timestamp('computed_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index('idx_sla_reports_escrow_pubkey').on(t.escrowPubkey)],
+);
+
+export const agentReputation = pgTable('agent_reputation', {
+  wallet: text('wallet').primaryKey(),
+  jobsCompleted: bigint('jobs_completed', { mode: 'bigint' }).notNull().default(sql`0`),
+  avgScore: smallint('avg_score').notNull().default(0),
+  totalScore: bigint('total_score', { mode: 'bigint' }).notNull().default(sql`0`),
+  lastUpdated: timestamp('last_updated', { withTimezone: true }).notNull().defaultNow(),
+});

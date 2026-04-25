@@ -22,6 +22,13 @@
       "when": 1777118889259,
       "tag": "0002_eminent_midnight",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1777132340370,
+      "tag": "0003_happy_supernaut",
+      "breakpoints": true
     }
   ]
 }
