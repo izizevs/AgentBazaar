@@ -3,7 +3,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AnchorWallet } from '../src/client.js';
 import { AgentBazaar } from '../src/client.js';
 import { discoverServices } from '../src/discover.js';
-import { DiscoveryAPIError, RPCFallbackFailedError, ValidationError } from '../src/errors.js';
+import {
+  DegradedDiscoveryError,
+  DiscoveryAPIError,
+  RPCFallbackFailedError,
+  ValidationError,
+} from '../src/errors.js';
 import type { ServiceProvider } from '../src/types.js';
 
 // ─── helpers ────────────────────────────────────────────────────────────────
@@ -403,9 +408,9 @@ describe('discoverServices — RPC fallback', () => {
     ]);
 
     const results = await discoverServices(connection, wallet, { sort: 'latency_asc' }, apiUrl);
-    expect(results[0]!.sla.maxLatencyMs).toBe(200);
-    expect(results[1]!.sla.maxLatencyMs).toBe(800);
-    expect(results[2]!.sla.maxLatencyMs).toBeUndefined();
+    expect(results[0]?.sla.maxLatencyMs).toBe(200);
+    expect(results[1]?.sla.maxLatencyMs).toBe(800);
+    expect(results[2]?.sla.maxLatencyMs).toBeUndefined();
   });
 
   it('respects limit', async () => {
@@ -440,6 +445,32 @@ describe('discoverServices — RPC fallback', () => {
     await expect(discoverServices(connection, wallet, {}, apiUrl)).rejects.toThrow(
       RPCFallbackFailedError,
     );
+  });
+
+  // L7: reputation is not on-chain in M0; minReputation > 0 would silently return [] via RPC.
+  it('L7: throws DegradedDiscoveryError when minReputation > 0 and RPC fallback is active', async () => {
+    setRpcListings([makeRpcListing({ isActive: true })]);
+
+    await expect(
+      discoverServices(connection, wallet, { minReputation: 50 }, apiUrl),
+    ).rejects.toThrow(DegradedDiscoveryError);
+  });
+
+  it('L7: DegradedDiscoveryError.filtersDropped includes minReputation', async () => {
+    setRpcListings([makeRpcListing({ isActive: true })]);
+
+    const err = await discoverServices(connection, wallet, { minReputation: 1 }, apiUrl).catch(
+      (e) => e,
+    );
+    expect(err).toBeInstanceOf(DegradedDiscoveryError);
+    expect((err as DegradedDiscoveryError).filtersDropped).toContain('minReputation');
+  });
+
+  it('L7: minReputation 0 does NOT throw (reputation 0 passes the filter)', async () => {
+    setRpcListings([makeRpcListing({ isActive: true })]);
+
+    const results = await discoverServices(connection, wallet, { minReputation: 0 }, apiUrl);
+    expect(results).toHaveLength(1);
   });
 });
 

@@ -4,7 +4,12 @@ import { AnchorProvider, Program } from '@coral-xyz/anchor';
 import { type Connection, PublicKey } from '@solana/web3.js';
 import { z } from 'zod';
 import type { AnchorWallet } from './client.js';
-import { DiscoveryAPIError, RPCFallbackFailedError, ValidationError } from './errors.js';
+import {
+  DegradedDiscoveryError,
+  DiscoveryAPIError,
+  RPCFallbackFailedError,
+  ValidationError,
+} from './errors.js';
 import type { DiscoverInput, ServiceProvider, SlaParams } from './types.js';
 
 const DEFAULT_LIMIT = 50;
@@ -19,10 +24,20 @@ const DiscoverInputSchema = z.object({
   limit: z.number().int().min(1).max(MAX_LIMIT).optional(),
 });
 
+// O8: base58 refinement ensures invalid pubkeys throw DiscoveryAPIError → fallback, not uncaught TypeError.
+const isBase58PublicKey = (s: string) => {
+  try {
+    new PublicKey(s);
+    return true;
+  } catch {
+    return false;
+  }
+};
+
 // M1: Zod schema for Discovery API wire format — validates before any consumer code runs.
 const APIServiceEntrySchema = z.object({
-  listing: z.string(),
-  owner: z.string(),
+  listing: z.string().refine(isBase58PublicKey, 'Invalid base58 public key'),
+  owner: z.string().refine(isBase58PublicKey, 'Invalid base58 public key'),
   capability: z.string().max(256),
   priceUsdc: z.string().regex(/^\d+$/),
   pricingModel: z.number().int().min(0).max(3),
@@ -223,11 +238,22 @@ export async function discoverServices(
   }
 
   // 2. RPC fallback
+  let rpcResults: ServiceProvider[];
   try {
-    return await fetchFromRPC(connection, wallet, validated, limit);
+    rpcResults = await fetchFromRPC(connection, wallet, validated, limit);
   } catch (err) {
     throw new RPCFallbackFailedError(
       `RPC fallback failed: ${err instanceof Error ? err.message : String(err)}`,
+      { cause: err },
     );
   }
+
+  // L7: reputation_score is not on-chain in M0; RPC results always have reputation=0.
+  // Applying minReputation would silently return empty results — throw instead so the
+  // caller can surface "reputation filtering unavailable" rather than an empty list.
+  if (validated.minReputation !== undefined && validated.minReputation > 0) {
+    throw new DegradedDiscoveryError(['minReputation']);
+  }
+
+  return rpcResults;
 }
