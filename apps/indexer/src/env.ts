@@ -11,7 +11,11 @@ const EnvSchema = z.object({
   DATABASE_URL: z.string().url(),
   HELIUS_API_KEY: z.string().min(1).optional(),
   // Required: indexer rejects all webhook requests when missing (fails closed).
-  HELIUS_WEBHOOK_SECRET: z.string().min(1),
+  // min(32) ensures the secret has meaningful entropy before startup.
+  HELIUS_WEBHOOK_SECRET: z.string().min(32),
+  // Optional Pinata IPFS gateway (e.g. https://your-subdomain.mypinata.cloud/ipfs).
+  // Falls back to https://ipfs.io/ipfs when unset.
+  PINATA_GATEWAY: z.string().url().optional(),
 });
 
 type Env = z.infer<typeof EnvSchema>;

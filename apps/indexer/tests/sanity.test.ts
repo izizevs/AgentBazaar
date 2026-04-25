@@ -4,7 +4,7 @@ import { app } from '../src/app.js';
 const TEST_SECRET = 'Bearer sanity-test-secret';
 
 beforeAll(() => {
-  process.env['HELIUS_WEBHOOK_SECRET'] = TEST_SECRET;
+  process.env.HELIUS_WEBHOOK_SECRET = TEST_SECRET;
 });
 
 describe('indexer', () => {

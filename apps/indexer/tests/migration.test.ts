@@ -24,7 +24,7 @@ const EXPECTED_INDEXES = [
   'idx_service_listings_discover',
 ] as const;
 
-const dbUrl = process.env['DATABASE_URL'];
+const dbUrl = process.env.DATABASE_URL;
 
 describe.skipIf(!dbUrl)('service_listings migration', () => {
   // biome-ignore lint/style/noNonNullAssertion: guarded by skipIf above

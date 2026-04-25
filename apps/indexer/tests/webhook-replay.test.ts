@@ -5,7 +5,7 @@ import { getSql } from '../src/db/client.js';
 const REGISTRY_PROGRAM_ID = 'GJRgCCqkYvAezidpdd3i4p4kRRfJnM1EfGfgqYgchQqd';
 const TEST_SECRET = 'Bearer test-webhook-secret-replay';
 
-const dbUrl = process.env['DATABASE_URL'];
+const dbUrl = process.env.DATABASE_URL;
 
 function makeEvent(signature: string, programId = REGISTRY_PROGRAM_ID) {
   return {
@@ -44,7 +44,7 @@ async function post(body: unknown): Promise<Response> {
 
 describe.skipIf(!dbUrl)('POST /webhooks/helius — replay protection', () => {
   beforeAll(() => {
-    process.env['HELIUS_WEBHOOK_SECRET'] = TEST_SECRET;
+    process.env.HELIUS_WEBHOOK_SECRET = TEST_SECRET;
   });
 
   afterAll(async () => {

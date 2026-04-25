@@ -6,7 +6,7 @@ import type { Context } from 'hono';
 // at request time (not via getEnv()) so auth tests can set it without needing
 // DATABASE_URL — keeping the DB-less CI test path intact.
 export function verifyHeliusAuth(c: Context): boolean {
-  const secret = process.env['HELIUS_WEBHOOK_SECRET'];
+  const secret = process.env.HELIUS_WEBHOOK_SECRET;
   if (!secret) return false;
 
   const received = c.req.header('Authorization') ?? '';

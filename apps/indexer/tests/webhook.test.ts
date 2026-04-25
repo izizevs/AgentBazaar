@@ -1,15 +1,25 @@
-import { beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { app } from '../src/app.js';
 
 const REGISTRY_PROGRAM_ID = 'GJRgCCqkYvAezidpdd3i4p4kRRfJnM1EfGfgqYgchQqd';
 const OTHER_PROGRAM_ID = '11111111111111111111111111111111';
 const TEST_SECRET = 'Bearer test-webhook-secret-abc123';
+const RUN = `wh-test-${Date.now()}`;
 
 beforeAll(() => {
-  process.env['HELIUS_WEBHOOK_SECRET'] = TEST_SECRET;
+  process.env.HELIUS_WEBHOOK_SECRET = TEST_SECRET;
 });
 
-function makeEvent(programId: string, signature = 'sig123') {
+afterAll(async () => {
+  const dbUrl = process.env.DATABASE_URL;
+  if (dbUrl) {
+    const { getSql } = await import('../src/db/client.js');
+    const sql = getSql();
+    await sql`DELETE FROM processed_signatures WHERE signature LIKE ${`${RUN}-%`}`;
+  }
+});
+
+function makeEvent(programId: string, signature = `${RUN}-default`) {
   return {
     description: 'test',
     type: 'UNKNOWN',
@@ -79,8 +89,8 @@ describe('POST /webhooks/helius — payload validation', () => {
 
   it('returns 200 and counts relevant registry events', async () => {
     const res = await post([
-      makeEvent(REGISTRY_PROGRAM_ID, 'sig-a'),
-      makeEvent(OTHER_PROGRAM_ID, 'sig-b'),
+      makeEvent(REGISTRY_PROGRAM_ID, `${RUN}-a`),
+      makeEvent(OTHER_PROGRAM_ID, `${RUN}-b`),
     ]);
     expect(res.status).toBe(200);
     const body = await res.json();
@@ -88,7 +98,7 @@ describe('POST /webhooks/helius — payload validation', () => {
   });
 
   it('returns 200 with zero relevant for non-registry events', async () => {
-    const res = await post([makeEvent(OTHER_PROGRAM_ID, 'sig-c')]);
+    const res = await post([makeEvent(OTHER_PROGRAM_ID, `${RUN}-c`)]);
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body).toMatchObject({ ok: true, processed: 1, relevant: 0 });
