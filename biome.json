@@ -59,7 +59,7 @@
   },
   "overrides": [
     {
-      "includes": ["programs/tests/**"],
+      "includes": ["programs/tests/**", "packages/sdk/examples/**"],
       "linter": {
         "rules": {
           "suspicious": {
