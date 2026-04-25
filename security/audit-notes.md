@@ -2196,3 +2196,265 @@ there.
 
 **Mainnet release-gate verdict:** N/A — test scaffolding never
 ships to npm or production deploys. Cleared to merge.
+
+---
+
+## PR #40 — feature/backend-event-handler — 2026-04-25 (substantial audit)
+**Verdict:** APPROVED FOR M0 DEVNET MERGE; **BLOCKED FOR PRODUCTION
+DEPLOY** until H1 closes. One **High**, two **Medium**, two **Low**, plus
+three informational notes. The High is **SSRF via attacker-controlled
+metadata URI** — the central security issue of the upsert path.
+
+**Scope walked:**
+- `apps/indexer/src/events/fetch-metadata.ts` (new, +33) — IPFS metadata fetch
+- `apps/indexer/src/events/decoder.ts` (new, +46) — BorshEventCoder wrapper
+- `apps/indexer/src/events/on-listing-created.ts` (new, +69) — upsert path
+- `apps/indexer/src/events/on-listing-updated.ts` (new, +71) — update path (second SSRF surface)
+- `apps/indexer/src/webhooks/handler.ts` (+41 / -32) — routing into event handlers (PR #35 M1 atomic INSERT carried)
+- `apps/indexer/src/env.ts` (+5 / -1) — adds `PINATA_GATEWAY` (optional URL); confirms PR #35 L1 `.min(32)` carried
+- `apps/indexer/tests/event-handler.test.ts` (new, +92) — DB-gated integration tests
+- minor: db/client, logger, auth lints (one-line each), webhook tests updated
+
+**PR #35 carryover verifications:**
+- ✅ M1 atomic `INSERT … RETURNING` (line 36-49 of new handler.ts) — exact code from f4a902f, comment references "(security-auditor PR #35 M1 fix)".
+- ✅ L1 `HELIUS_WEBHOOK_SECRET: z.string().min(32)`.
+
+**Findings:**
+
+- **Critical:** none.
+
+- **High:**
+
+  - **H1. SSRF via attacker-controlled `metadataUri` in `fetchMetadata`.**
+    The `metadataUri` in `ServiceListingCreated` / `ServiceListingUpdated`
+    events comes from on-chain state. The on-chain `bazaar-registry`
+    program only validates length (`metadata_uri.len() <= 64`) — no
+    scheme allowlist, no content validation. **Anyone can register
+    a listing with any URI ≤64 chars and the indexer will fetch it.**
+
+    `fetch-metadata.ts:resolveIpfsUrl` rewrites `ipfs://` URIs to a
+    gateway URL but **passes any other URI through verbatim** to
+    Node's `fetch()`. That means:
+    - `http://localhost:5432/` (or any internal port) — 22 chars, fits the 64-byte limit. Probes the indexer's loopback.
+    - `http://10.0.0.1/admin` — 21 chars. Probes private network.
+    - `http://[::1]/` — 13 chars. Probes IPv6 loopback.
+    - `http://169.254.169.254/` — 23 chars. **AWS / cloud metadata endpoint** (also Azure, GCP, etc.).
+    - `https://internal.x` — 18 chars. Probes private DNS.
+    - `https://user:pass@x.io/m` — embeds credentials that flow into logs (see M2).
+
+    **Concrete exploit chain:**
+    1. Attacker registers a listing with
+       `metadataUri = "http://169.254.169.254/latest/meta-data/iam/security-credentials/"` (truncated to fit 64 chars; even root path probes are valuable).
+    2. Helius webhook delivers the `ServiceListingCreated` event to the indexer.
+    3. Indexer's `fetchMetadata` calls Node's `fetch()` against the URL.
+    4. Node's `fetch` follows redirects by default — attacker can redirect to longer URLs not bounded by the 64-char limit.
+    5. Response goes through `MetadataSchema.safeParse(json)`. Direct exfiltration is partially mitigated (the response must look like agent metadata to populate `service_listings.capability` / `endpoint`), BUT:
+       - **Side channels:** response timing, success/failure, log entries (`logger.warn({ url, status })`) reveal whether the URL is reachable, what status it returned. An attacker watching logs (e.g., via Helius dashboard webhook delivery logs, or by comparing `discover()` responses for listings before/after) can enumerate the indexer's internal network topology.
+       - **Resource exhaustion:** N malicious listings × 10 s timeout each = significant CPU/network burn during the indexer's process loop.
+       - **Internal-service abuse with side effects:** GET requests to internal endpoints that mutate state on GET (rare but documented patterns exist — old SOAP services, legacy dashboards). The 64-char limit blocks long URLs but redirects bypass that.
+
+    **Severity rationale: HIGH for production, ACCEPTED for M0 devnet
+    sandbox.** Devnet's blast radius is limited (no mainnet funds, no
+    production tenants). But the moment this indexer is deployed to
+    Railway / a managed environment, the AWS metadata endpoint is
+    reachable and credentials are exposed.
+
+    **Required mitigations (defense in depth):**
+
+    1. **Scheme allowlist.** Reject anything that isn't `ipfs://` or
+       `https://`. Return early without fetching:
+       ```ts
+       if (!uri.startsWith('ipfs://') && !uri.startsWith('https://')) {
+         logger.warn({ uri }, 'metadata fetch rejected: scheme not allowed');
+         return null;
+       }
+       ```
+       Closes `http://`, `file:`, `data:`, `javascript:`, `gopher://`, etc.
+
+    2. **Hostname allowlist OR private-IP blocklist.** For Pinata-only
+       deploys (the documented production path), allowlist:
+       ```ts
+       const ALLOWED_HOSTS = new Set([
+         'ipfs.io',
+         new URL(process.env.PINATA_GATEWAY ?? 'https://ipfs.io').hostname,
+       ]);
+       ```
+       For more flexible deploys, block private/reserved/loopback IP
+       ranges after DNS resolution:
+       ```ts
+       import { lookup } from 'node:dns/promises';
+       import { isIPv4, isIPv6 } from 'node:net';
+
+       const PRIVATE_V4 = [/^127\./, /^10\./, /^192\.168\./, /^172\.(1[6-9]|2[0-9]|3[01])\./, /^169\.254\./];
+       const { address } = await lookup(new URL(url).hostname);
+       if (PRIVATE_V4.some(re => re.test(address)) || address === '::1' || address.startsWith('fe80::')) {
+         logger.warn({ url, address }, 'metadata fetch rejected: private IP');
+         return null;
+       }
+       ```
+       *Caveat:* DNS rebinding can defeat hostname-based allowlists by
+       resolving differently between the lookup and the actual fetch.
+       For strict protection, use a custom undici dispatcher that
+       enforces the IP at connection time. For M0/M1 the lookup-then-
+       fetch pattern is acceptable defense-in-depth.
+
+    3. **Redirect control.** Node's fetch follows redirects by default:
+       ```ts
+       fetch(url, { signal: AbortSignal.timeout(10_000), redirect: 'error' })
+       ```
+       Returns the redirect response with a 3xx status; `res.ok` is
+       false, fetch fails, return null. Attackers can't redirect to
+       internal endpoints.
+
+       Or: `redirect: 'manual'` to inspect the `Location` header and
+       re-validate it against the allowlist before refetching.
+
+    4. **Response size cap.** Currently `await res.json()` reads the
+       full body unbounded. A 1 GB response OOMs the indexer.
+       ```ts
+       const contentLength = Number(res.headers.get('content-length') ?? '0');
+       if (contentLength > 100_000) {  // metadata is small; 100 KB is generous
+         logger.warn({ url, contentLength }, 'metadata fetch rejected: too large');
+         return null;
+       }
+       const text = await res.text();
+       if (text.length > 100_000) return null;
+       const json = JSON.parse(text);
+       ```
+
+    These four together close the SSRF cleanly. They're all
+    standalone changes; estimate one focused PR.
+
+- **Medium:**
+
+  - **M1. Path traversal in `resolveIpfsUrl`.** The CID is interpolated
+    directly into the gateway URL without format validation:
+    ```ts
+    const cid = uri.slice('ipfs://'.length);
+    return `${gateway}/${cid}`;
+    ```
+
+    An attacker registering with
+    `metadataUri = "ipfs://../some-other-path"` produces:
+    ```
+    https://my-pinata.cloud/ipfs/../some-other-path
+    ```
+    URL normalization turns this into
+    `https://my-pinata.cloud/some-other-path`. If `PINATA_GATEWAY` is
+    a self-hosted gateway sharing a hostname with other endpoints
+    (e.g., `https://my-app.com/api/ipfs` shares `my-app.com` with
+    `https://my-app.com/api/auth-bypass`), the path traversal escapes
+    the IPFS namespace.
+
+    Public `ipfs.io` deploys are safe because `ipfs.io` doesn't host
+    sensitive endpoints next to `/ipfs/`. **Risk depends on the
+    operator's gateway setup.**
+
+    **Fix:** validate the CID format with a regex (CIDs are base58/
+    base32 alphanumerics):
+    ```ts
+    if (!/^[a-zA-Z0-9]+$/.test(cid)) {
+      logger.warn({ uri }, 'metadata fetch rejected: invalid CID');
+      return null;
+    }
+    ```
+    Or use the `multiformats` library to parse-and-reformat.
+
+  - **M2. Attacker-controlled URL flows into log lines.**
+    `logger.warn({ url, status }, '...')` and `logger.warn({ url,
+    err }, '...')`. If `metadataUri = "https://user:pass@x.io/"` is
+    registered on-chain, `pass` lands in the indexer's logs. Log
+    aggregators (Datadog, Helius dashboards, etc.) typically have
+    broader access than the indexer process — credential leak path.
+
+    Even without embedded credentials, the URL itself reveals the
+    attacker's probing target — useful for reconnaissance correlation.
+
+    **Fix:** strip URL credentials before logging:
+    ```ts
+    function safeLogUrl(u: string): string {
+      try {
+        const parsed = new URL(u);
+        parsed.username = '';
+        parsed.password = '';
+        return parsed.toString();
+      } catch {
+        return '<unparseable url>';
+      }
+    }
+    ```
+
+- **Low:**
+
+  - **L1. No response size limit on `await res.json()`.** Folded into
+    H1's mitigation #4 above. Standalone if H1 isn't taken in the
+    same fix pass.
+
+  - **L2. `decodeRegistryEvent` uses `as unknown as RegistryEvent`
+    type assertion without runtime validation.** If the IDL changes
+    the event shape (field rename, type change, new optional
+    field), the assertion silently passes and downstream code
+    crashes when accessing missing fields. Tracking the IDL via
+    `packages/idl`'s snapshot test reduces drift, but a runtime
+    Zod-validate of the decoded payload would be belt-and-suspenders
+    cheap.
+
+**Three informational notes (not findings):**
+
+- **O1.** Default IPFS gateway is `https://ipfs.io/ipfs` — public,
+  rate-limited. Production deploys should set `PINATA_GATEWAY` to
+  a dedicated gateway. Already documented in `.env.example`.
+
+- **O2.** Carryforward from PR #35: **L2 retention TTL on
+  `processed_signatures`**. Pre-mainnet polish; not addressed here.
+
+- **O3. Backend-eng's question about base58 carryover from O8 (PR #21)
+  — does NOT apply to this PR's surface.** The pubkey strings
+  flowing into the upsert (`data.listing.toString()`,
+  `data.owner.toString()`) come from `BorshEventCoder.decode`
+  on-chain data, NOT from the HTTP wire payload. The on-chain
+  encoder is the authority for those bytes. The webhook payload's
+  `programId` field is only used in string-equality compares
+  against the hardcoded `BAZAAR_REGISTRY_PROGRAM_ID` — no
+  `new PublicKey()` parse. So the O8 finding doesn't repeat here.
+
+  *(For completeness:* an attacker who somehow tampers with the
+  Helius delivery payload to put a different `programId` in the
+  outer instruction would just bypass the indexer's
+  registry-detection — events for non-bazaar-registry programs
+  get skipped. Helius's authentication (`HELIUS_WEBHOOK_SECRET`)
+  prevents this anyway.*)*
+
+**Cross-cutting carryover (informational):**
+- **L6 from PR #19** (server-side `memcmp` filtering for SDK
+  fallback): the schema (PR #24) has the right indexes
+  (`idx_service_listings_capability_hash`,
+  `idx_service_listings_discover`); the upsert path now
+  populates them on every event; the API route in Task #16
+  closes the loop. **L6 trajectory remains clean.**
+- **PR #2 M2 (`price_lamports` rename):** schema still mirrors
+  IDL with explicit NOTE comment; deferred to M1.
+
+**Mainnet release-gate verdict:**
+- **M0 devnet sandbox:** APPROVED to merge. No real funds, no
+  production tenants, indexer not exposed to public deploy.
+- **Production / mainnet:** **BLOCKED on H1.** SSRF must close
+  before the indexer runs in any cloud environment with internal
+  network exposure (Railway, Fly, AWS — all expose
+  `169.254.169.254` and private RFC 1918 ranges).
+
+**Recommended fix order:**
+1. **Before any production deploy (M1+):** H1 SSRF mitigations
+   (scheme allowlist + private-IP block + redirect control +
+   response-size cap). Pair with M1 (CID format validation) and
+   M2 (URL-credential sanitization in logs) — same
+   fetch-metadata.ts module.
+2. **Pre-mainnet:** L2 (retention TTL from PR #35), L2 here
+   (decoder Zod validation), O1 documentation.
+
+This is the most substantive on-chain → off-chain trust-boundary
+finding of the M0 trajectory. The patterns from earlier audits
+(Zod-first, fail-fast, strict scheme refines from PR #17 / PR #21
+/ PR #26) need to extend to *outbound* HTTP at the indexer
+boundary the same way they extended to *inbound* HTTP at the
+SDK / API / webhook boundary.
