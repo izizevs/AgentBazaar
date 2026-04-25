@@ -18,6 +18,7 @@
       "!**/coverage",
       "!**/.worktrees",
       "!packages/idl/src/generated",
+      "!packages/idl/src/bazaar-*.ts",
       "!packages/idl/idl",
       "!apps/indexer/drizzle"
     ]
