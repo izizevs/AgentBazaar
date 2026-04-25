@@ -87,7 +87,73 @@ else
     --locked
 fi
 
-# --- 5. cargo-build-sbf SDK scripts (strip.sh / env.sh) ---
+# --- 5. cargo-build-sbf (separate crate, not included in solana-cli) ---
+# anchor build invokes `cargo build-sbf` which dispatches to this binary.
+# It lives in sdk/cargo-build-sbf inside the agave checkout.
+install_cargo_build_sbf() {
+  if command -v cargo-build-sbf >/dev/null 2>&1; then
+    log "cargo-build-sbf already installed"
+    return
+  fi
+  local agave_src
+  agave_src="$(ls -d "${HOME}/.cargo/git/checkouts/agave-"*/* 2>/dev/null | head -1)"
+  if [[ -z "${agave_src}" || ! -d "${agave_src}/sdk/cargo-build-sbf" ]]; then
+    log "warn: agave source checkout not found; skipping cargo-build-sbf install"
+    return
+  fi
+  log "Installing cargo-build-sbf from local agave checkout…"
+  cargo install --path "${agave_src}/sdk/cargo-build-sbf" --locked
+}
+install_cargo_build_sbf
+
+# --- 6. SBF platform-tools (aarch64 fix) ---
+# cargo-build-sbf downloads platform-tools on first use into ~/.cache/solana/<version>/.
+# The upstream install.sh arch-detection uses `arm64*` but `uname -m` on Linux returns
+# `aarch64`, not `arm64`, so it falls through to x86_64 — breaking the build with:
+#   "OrbStack ERROR: Dynamic loader not found: /lib64/ld-linux-x86-64.so.2"
+# Fix: pre-seed the cache with the correct aarch64 tarball so cargo-build-sbf never
+# triggers the broken download.
+install_platform_tools_aarch64() {
+  local arch
+  arch="$(uname -m)"
+  [[ "${arch}" == "aarch64" ]] || return 0  # x86_64 downloads correctly already
+
+  # Determine the platform-tools version cargo-build-sbf expects by reading the
+  # install.sh inside the agave checkout (the version= line near `platform-tools`).
+  local agave_src pt_version
+  agave_src="$(ls -d "${HOME}/.cargo/git/checkouts/agave-"*/* 2>/dev/null | head -1)"
+  pt_version="$(grep -A2 'platform-tools' "${agave_src}/sdk/sbf/scripts/install.sh" 2>/dev/null \
+    | grep '^version=' | head -1 | cut -d= -f2)"
+  [[ -n "${pt_version}" ]] || { log "warn: cannot determine platform-tools version; skipping pre-seed"; return; }
+
+  local cache_dir="${HOME}/.cache/solana/${pt_version}/platform-tools"
+  if [[ -x "${cache_dir}/rust/bin/rustc" ]]; then
+    log "platform-tools ${pt_version} (aarch64) already in cache"
+    return
+  fi
+
+  log "Pre-seeding aarch64 platform-tools ${pt_version} into cache…"
+  local url="https://github.com/anza-xyz/platform-tools/releases/download/${pt_version}/platform-tools-linux-aarch64.tar.bz2"
+  local tmp
+  tmp="$(mktemp -d)"
+  wget -q --show-progress -O "${tmp}/pt.tar.bz2" "${url}"
+
+  # The tarball extracts as llvm/ rust/ version.md — wrap in platform-tools/
+  mkdir -p "${cache_dir}"
+  tar --strip-components 0 -jxf "${tmp}/pt.tar.bz2" -C "${cache_dir}"
+  rm -rf "${tmp}"
+
+  # If the tarball used a nested dir, flatten it
+  if [[ ! -x "${cache_dir}/rust/bin/rustc" && -d "${cache_dir}/platform-tools" ]]; then
+    mv "${cache_dir}/platform-tools/"* "${cache_dir}/"
+    rmdir "${cache_dir}/platform-tools"
+  fi
+
+  log "platform-tools ${pt_version} (aarch64) cached at ${cache_dir}"
+}
+install_platform_tools_aarch64
+
+# --- 7. cargo-build-sbf SDK scripts (strip.sh / env.sh) ---
 # `cargo install solana-cli` deposits the binary but not the sdk/sbf/ tree that
 # cargo-build-sbf reads for post-link stripping. Symlink from the agave source
 # checkout (already on disk after step 2) to the path cargo-build-sbf expects.
