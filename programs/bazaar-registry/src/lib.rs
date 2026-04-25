@@ -1,5 +1,6 @@
 use anchor_lang::prelude::*;
 use anchor_lang::solana_program::pubkey;
+use crate::program::BazaarRegistry;
 
 declare_id!("ADWoSmfUWLLRGMWZ61xuAMPhDgG77ziqAC5MA9voqLn3");
 
@@ -60,7 +61,7 @@ pub mod bazaar_registry {
         listing.created_at = clock.unix_timestamp;
         listing.bump = ctx.bumps.listing;
 
-        emit!(ServiceListingCreated {
+        emit_cpi!(ServiceListingCreated {
             listing: listing.key(),
             owner: listing.owner,
             sati_agent_id,
@@ -97,7 +98,7 @@ pub mod bazaar_registry {
             listing.metadata_uri = uri.clone();
         }
 
-        emit!(ServiceListingUpdated {
+        emit_cpi!(ServiceListingUpdated {
             listing: listing.key(),
             owner: listing.owner,
             new_price,
@@ -114,7 +115,7 @@ pub mod bazaar_registry {
         require!(listing.is_active, RegistryError::AlreadyInactive);
         listing.is_active = false;
 
-        emit!(ServiceListingUpdated {
+        emit_cpi!(ServiceListingUpdated {
             listing: listing.key(),
             owner: listing.owner,
             new_price: None,
@@ -131,7 +132,7 @@ pub mod bazaar_registry {
         require!(!listing.is_active, RegistryError::AlreadyActive);
         listing.is_active = true;
 
-        emit!(ServiceListingUpdated {
+        emit_cpi!(ServiceListingUpdated {
             listing: listing.key(),
             owner: listing.owner,
             new_price: None,
@@ -186,6 +187,11 @@ pub struct RegisterService<'info> {
     pub listing: Account<'info, ServiceListing>,
 
     pub system_program: Program<'info, System>,
+
+    /// CHECK: Anchor event authority PDA for emit_cpi.
+    #[account(seeds = [b"__event_authority"], bump)]
+    pub event_authority: AccountInfo<'info>,
+    pub program: Program<'info, BazaarRegistry>,
 }
 
 #[derive(Accounts)]
@@ -199,6 +205,11 @@ pub struct UpdateService<'info> {
         bump = listing.bump,
     )]
     pub listing: Account<'info, ServiceListing>,
+
+    /// CHECK: Anchor event authority PDA for emit_cpi.
+    #[account(seeds = [b"__event_authority"], bump)]
+    pub event_authority: AccountInfo<'info>,
+    pub program: Program<'info, BazaarRegistry>,
 }
 
 #[derive(Accounts)]
@@ -212,6 +223,11 @@ pub struct ToggleService<'info> {
         bump = listing.bump,
     )]
     pub listing: Account<'info, ServiceListing>,
+
+    /// CHECK: Anchor event authority PDA for emit_cpi.
+    #[account(seeds = [b"__event_authority"], bump)]
+    pub event_authority: AccountInfo<'info>,
+    pub program: Program<'info, BazaarRegistry>,
 }
 
 #[account]

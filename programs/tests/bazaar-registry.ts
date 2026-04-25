@@ -12,6 +12,7 @@ import type { BazaarRegistry } from '../target/types/bazaar_registry';
 // -------------------------------------------------------------------------
 
 const LISTING_SEED = Buffer.from('listing');
+const EVENT_AUTHORITY_SEED = Buffer.from('__event_authority');
 
 function hashCapability(capability: string): Buffer {
   return createHash('sha256').update(capability).digest();
@@ -22,6 +23,10 @@ function listingPda(programId: PublicKey, owner: PublicKey, capabilityHash: Buff
     [LISTING_SEED, owner.toBuffer(), capabilityHash],
     programId,
   )[0];
+}
+
+function eventAuthorityPda(programId: PublicKey): PublicKey {
+  return PublicKey.findProgramAddressSync([EVENT_AUTHORITY_SEED], programId)[0];
 }
 
 async function fund(connection: anchor.web3.Connection, pubkey: PublicKey, sol = 2): Promise<void> {
@@ -66,10 +71,12 @@ describe('bazaar-registry', () => {
   let capability: string;
   let capabilityHash: Buffer;
   let listing: PublicKey;
+  let eventAuthority: PublicKey;
 
   before(async () => {
     seller = Keypair.generate();
     outsider = Keypair.generate();
+    eventAuthority = eventAuthorityPda(program.programId);
     await fund(connection, seller.publicKey, 5);
     await fund(connection, outsider.publicKey, 2);
   });
@@ -102,6 +109,8 @@ describe('bazaar-registry', () => {
           owner: seller.publicKey,
           listing,
           systemProgram: SystemProgram.programId,
+          eventAuthority,
+          program: program.programId,
         } as any)
         .signers([seller])
         .rpc();
@@ -133,6 +142,8 @@ describe('bazaar-registry', () => {
             owner: seller.publicKey,
             listing: zeroListing,
             systemProgram: SystemProgram.programId,
+            eventAuthority,
+            program: program.programId,
           } as any)
           .signers([seller])
           .rpc();
@@ -150,6 +161,8 @@ describe('bazaar-registry', () => {
             owner: seller.publicKey,
             listing,
             systemProgram: SystemProgram.programId,
+            eventAuthority,
+            program: program.programId,
           } as any)
           .signers([seller])
           .rpc();
@@ -168,6 +181,8 @@ describe('bazaar-registry', () => {
             owner: seller.publicKey,
             listing,
             systemProgram: SystemProgram.programId,
+            eventAuthority,
+            program: program.programId,
           } as any)
           .signers([seller])
           .rpc();
@@ -186,6 +201,8 @@ describe('bazaar-registry', () => {
             owner: seller.publicKey,
             listing,
             systemProgram: SystemProgram.programId,
+            eventAuthority,
+            program: program.programId,
           } as any)
           .signers([seller])
           .rpc();
@@ -202,6 +219,8 @@ describe('bazaar-registry', () => {
           owner: seller.publicKey,
           listing,
           systemProgram: SystemProgram.programId,
+          eventAuthority,
+          program: program.programId,
         } as any)
         .signers([seller])
         .rpc();
@@ -213,6 +232,8 @@ describe('bazaar-registry', () => {
             owner: seller.publicKey,
             listing,
             systemProgram: SystemProgram.programId,
+            eventAuthority,
+            program: program.programId,
           } as any)
           .signers([seller])
           .rpc();
@@ -241,6 +262,8 @@ describe('bazaar-registry', () => {
           owner: seller.publicKey,
           listing,
           systemProgram: SystemProgram.programId,
+          eventAuthority,
+          program: program.programId,
         } as any)
         .signers([seller])
         .rpc();
@@ -249,7 +272,12 @@ describe('bazaar-registry', () => {
     it('updates price, SLA and metadata_uri when owner calls', async () => {
       await program.methods
         .updateService(new BN(9_999), fullSla(), 'ipfs://new')
-        .accounts({ owner: seller.publicKey, listing } as any)
+        .accounts({
+          owner: seller.publicKey,
+          listing,
+          eventAuthority,
+          program: program.programId,
+        } as any)
         .signers([seller])
         .rpc();
 
@@ -263,7 +291,12 @@ describe('bazaar-registry', () => {
     it('leaves fields untouched when corresponding argument is None', async () => {
       await program.methods
         .updateService(new BN(1234), null, null)
-        .accounts({ owner: seller.publicKey, listing } as any)
+        .accounts({
+          owner: seller.publicKey,
+          listing,
+          eventAuthority,
+          program: program.programId,
+        } as any)
         .signers([seller])
         .rpc();
 
@@ -277,7 +310,12 @@ describe('bazaar-registry', () => {
       try {
         await program.methods
           .updateService(new BN(1), null, null)
-          .accounts({ owner: outsider.publicKey, listing } as any)
+          .accounts({
+            owner: outsider.publicKey,
+            listing,
+            eventAuthority,
+            program: program.programId,
+          } as any)
           .signers([outsider])
           .rpc();
         expect.fail('expected Unauthorized');
@@ -297,6 +335,8 @@ describe('bazaar-registry', () => {
           owner: seller.publicKey,
           listing,
           systemProgram: SystemProgram.programId,
+          eventAuthority,
+          program: program.programId,
         } as any)
         .signers([seller])
         .rpc();
@@ -305,7 +345,12 @@ describe('bazaar-registry', () => {
     it('deactivates an active listing', async () => {
       await program.methods
         .deactivateService()
-        .accounts({ owner: seller.publicKey, listing } as any)
+        .accounts({
+          owner: seller.publicKey,
+          listing,
+          eventAuthority,
+          program: program.programId,
+        } as any)
         .signers([seller])
         .rpc();
       const acct = await program.account.serviceListing.fetch(listing);
@@ -315,12 +360,22 @@ describe('bazaar-registry', () => {
     it('reactivates a deactivated listing', async () => {
       await program.methods
         .deactivateService()
-        .accounts({ owner: seller.publicKey, listing } as any)
+        .accounts({
+          owner: seller.publicKey,
+          listing,
+          eventAuthority,
+          program: program.programId,
+        } as any)
         .signers([seller])
         .rpc();
       await program.methods
         .reactivateService()
-        .accounts({ owner: seller.publicKey, listing } as any)
+        .accounts({
+          owner: seller.publicKey,
+          listing,
+          eventAuthority,
+          program: program.programId,
+        } as any)
         .signers([seller])
         .rpc();
       const acct = await program.account.serviceListing.fetch(listing);
@@ -330,14 +385,24 @@ describe('bazaar-registry', () => {
     it('rejects deactivate when already inactive', async () => {
       await program.methods
         .deactivateService()
-        .accounts({ owner: seller.publicKey, listing } as any)
+        .accounts({
+          owner: seller.publicKey,
+          listing,
+          eventAuthority,
+          program: program.programId,
+        } as any)
         .signers([seller])
         .rpc();
 
       try {
         await program.methods
           .deactivateService()
-          .accounts({ owner: seller.publicKey, listing } as any)
+          .accounts({
+            owner: seller.publicKey,
+            listing,
+            eventAuthority,
+            program: program.programId,
+          } as any)
           .signers([seller])
           .rpc();
         expect.fail('expected AlreadyInactive');
@@ -350,7 +415,12 @@ describe('bazaar-registry', () => {
       try {
         await program.methods
           .reactivateService()
-          .accounts({ owner: seller.publicKey, listing } as any)
+          .accounts({
+            owner: seller.publicKey,
+            listing,
+            eventAuthority,
+            program: program.programId,
+          } as any)
           .signers([seller])
           .rpc();
         expect.fail('expected AlreadyActive');
@@ -363,7 +433,12 @@ describe('bazaar-registry', () => {
       try {
         await program.methods
           .deactivateService()
-          .accounts({ owner: outsider.publicKey, listing } as any)
+          .accounts({
+            owner: outsider.publicKey,
+            listing,
+            eventAuthority,
+            program: program.programId,
+          } as any)
           .signers([outsider])
           .rpc();
         expect.fail('expected Unauthorized');
