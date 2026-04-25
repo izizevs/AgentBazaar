@@ -3209,3 +3209,455 @@ test SUCCESS). The fix commit's negative tests directly demonstrate that
 both critical attack vectors are now closed. The M0 audit-discipline pattern
 (substantive walk → exact recommended fix → re-review confirms) executed
 end-to-end on the first funds-bearing program — the discipline pays for itself.
+
+---
+
+## PR #59 — feature/sdk-hire — 2026-04-25
+**Verdict:** ❌ **BLOCK** — 1 HIGH severity logic bug breaks the timeout SLA
+guarantee end-to-end; 2 MEDIUM (duplicate-funding race + indiscriminate
+retries on program errors); 6 LOW. No critical vault-side findings — the
+on-chain hardening from PR #51 (C1 + C2) carries the security weight, and
+the SDK correctly relies on it. But the SDK has its own bug surface around
+the *parameters it passes* to the on-chain program, and that's where H1
+lives.
+
+**Scope of review:**
+- `packages/sdk/src/hire.ts` (new, 102 lines) — substantive (USDC inflow)
+- `packages/sdk/src/confirm.ts` (new, 64 lines) — substantive (USDC release)
+- `packages/sdk/src/dispute.ts` (new, 56 lines) — substantive (state mutation
+  + refund)
+- `packages/sdk/src/escrow-utils.ts` (new, 107 lines) — substantive (retry
+  loop, error mapping, ATA derivation, PDA constants)
+- `packages/sdk/src/deliver.ts` (new, 59 lines) — light (auth on-chain)
+- `packages/sdk/src/claimTimeout.ts` (new, 50 lines) — light (timeout
+  on-chain)
+- `packages/sdk/src/client.ts` — light (orchestrator + secrecy hygiene)
+- Tests reviewed for whether they would have caught the findings (they
+  don't catch H1 because mocks don't validate the BN values passed to the
+  instruction).
+
+Walked the funds-touching paths end-to-end against the on-chain program as
+audited and merged in PR #51. The SDK correctly delegates final authority
+checks to the on-chain program (state machine, owner constraints,
+mint binding) — that part is right. The findings concentrate on (1) one
+parameter the SDK miscomputes before passing to the program, and (2) the
+client-side retry loop's interaction with auto-generated nonces.
+
+### Findings
+
+#### High (BLOCK)
+
+- **H1. `hire.ts` passes an absolute timestamp where the on-chain program
+  expects a relative offset → SLA timeout becomes unreachable.**
+
+  `hire.ts:82`:
+  ```ts
+  const deadlineSecs = Math.floor(Date.now() / 1000) + input.timeout;
+  ```
+  Then passed to the program:
+  ```ts
+  .createEscrow(
+      new BN(input.budget.toString()),
+      input.sla.maxLatencyMs ?? null,
+      input.sla.responseFormat ?? null,
+      new BN(deadlineSecs),
+      new BN(nonce.toString()),
+  )
+  ```
+
+  But on-chain (`programs/bazaar-escrow/src/lib.rs:53-57` on `main`):
+  ```rust
+  let clock = Clock::get()?;
+  let deadline_ts = clock
+      .unix_timestamp
+      .checked_add(deadline_secs)
+      .ok_or(EscrowError::ArithmeticOverflow)?;
+  ```
+
+  The program **adds the parameter to the current chain time** — it expects
+  a relative duration, not an absolute future timestamp. The SDK is sending
+  `now + timeout`, which becomes `now + (now + timeout)` ≈ `2·now + timeout`
+  on-chain. With `now ≈ 1.745e9` (April 2026), the actual on-chain
+  `deadline_ts` lands around **3.49e9 seconds since epoch ≈ year 2080**,
+  regardless of the user's `timeout` input.
+
+  **Impact.**
+  - `claim_timeout` requires `clock.unix_timestamp > escrow.deadline_ts`.
+    With `deadline_ts ≈ 2080`, sellers can never claim timeout — they're
+    blocked for ~54 years on every escrow.
+  - Buyers retain effectively unlimited time to confirm (or never confirm).
+    A non-responsive buyer locks the seller's pay until 2080 with no
+    on-chain recovery path. The seller's only options are off-chain pressure
+    or asking the buyer to dispute (which refunds *the buyer*, not the
+    seller).
+  - The PRD §7 SLA timeout-claim guarantee — one of the five core escrow
+    instructions — is functionally non-existent on every escrow created via
+    the SDK. Direct-program callers (a future raw-tx integration) would
+    work correctly, so this is purely an SDK regression.
+
+  **Why tests don't catch it.** `tests/hire.test.ts:75` sets `timeout:
+  3600` and the success path asserts only on the returned `EscrowHandle`.
+  The mock `program.methods.createEscrow` (`tests/hire.test.ts:28-32`)
+  ignores its arguments and returns a stub. No assertion on the BN value
+  passed for the deadline parameter. Adding a single
+  `expect(mockCreateEscrow).toHaveBeenCalledWith(..., new BN(input.timeout),
+  ...)` (or extracting the captured arg and comparing) would catch this
+  immediately.
+
+  **Recommended fix.** Pass `input.timeout` directly:
+  ```ts
+  const ix = await program.methods
+      .createEscrow(
+          new BN(input.budget.toString()),
+          input.sla.maxLatencyMs ?? null,
+          input.sla.responseFormat ?? null,
+          new BN(input.timeout),  // RELATIVE seconds; on-chain adds Clock
+          new BN(nonce.toString()),
+      )
+      ...
+  ```
+  And drop the `deadlineSecs` local. Add a `hire.test.ts` assertion that
+  asserts `createEscrow` was called with `new BN(3600)` when `timeout: 3600`
+  is in the input — this regression test is what makes H1 stay fixed.
+
+  **Severity rationale.** Not a theft vector (vault is still
+  PDA-controlled, owner constraints are intact per PR #51), so not
+  CRITICAL. But it nullifies a documented SLA guarantee on every single
+  escrow that the SDK creates — which is functionally every M1 escrow,
+  because the SDK is the only documented client. Worse than MEDIUM, easier
+  to fix than the C-tier on-chain findings.
+
+#### Medium
+
+- **M1. `sendWithRetry` + auto-generated `Date.now()` nonce can cause
+  duplicate USDC deposits across user-level retries.**
+
+  Two-level retry interaction:
+  1. Inside `sendWithRetry` (`escrow-utils.ts:50`), the loop runs the same
+     instruction up to 3 times with escalating priority fees. *Within* a
+     single `hireAgent()` call, the nonce captured at `hire.ts:51` stays
+     constant across retries — so the escrow PDA is the same. If retry-2
+     succeeds, the user gets the right escrow. If a previous retry actually
+     landed but its confirmation was missed (network blip, RPC timeout),
+     the next retry's `init` will fail with "account already exists" → the
+     loop catches it as `lastError` → continues → all 3 fail → throws
+     `TransactionFailedError`. **At this point the escrow exists on-chain
+     but the SDK reports failure.**
+  2. The user, seeing failure, calls `hire()` again. `hire.ts:51` now
+     evaluates `BigInt(Date.now())` → a *new* nonce → derives a *different*
+     escrow PDA. The idempotency check at `hire.ts:66` finds nothing at
+     the new PDA → proceeds to `createEscrow` → a *second* USDC deposit
+     into a *second* vault. **Duplicate funding, real USDC loss.**
+
+  This is a realistic flaky-network scenario. The naive user fix (call
+  `hire()` again) is the wrong move and the SDK does nothing to warn them.
+
+  **Recommended fix.** Two complementary changes:
+  - Make `hire()`'s default nonce *deterministic* per (buyer, listing,
+    budget, current-minute or similar coarse bucket) so unintentional
+    user-level retries hit the existing escrow's idempotency path. A SHA256
+    of those inputs gives a 64-bit prefix that's stable across retries
+    within the bucket.
+  - Document loudly in the JSDoc that for production use, the caller
+    SHOULD pass an explicit `nonce` derived from their own
+    business-deterministic source (job ID, request ID, etc.). The SDK
+    docstring at `client.ts:108-110` doesn't currently mention this.
+
+  Lower-priority but worth considering: change `sendWithRetry` to
+  distinguish "tx landed and execution failed" from "tx never landed" —
+  if execution failed (`result.value.err` set), don't retry; throw
+  immediately. That removes the missed-confirmation foot-cannon for the
+  in-loop case.
+
+- **M2. `sendWithRetry` retries on ALL errors, including non-transient
+  program errors.**
+
+  `escrow-utils.ts:50-72` catches everything in a single broad `catch`,
+  treating program-error rejects (e.g., `InvalidStateTransition`,
+  `Unauthorized`, `ZeroAmount`) the same as transient network errors.
+  Result: a tx that lands but reverts on, say, `InvalidStateTransition`
+  costs the user the base fee + retry priority fees `[100_000, 500_000]`
+  microlamports for two more attempts that will deterministically fail
+  the same way. On a busy mainnet that's wasted money for zero progress.
+
+  This is M-not-H because (a) wasted devnet fees are zero-impact and
+  (b) the dollar amount on mainnet is small. But it's bad UX and bad
+  defensive design.
+
+  **Recommended fix.** Sort errors into transient vs terminal:
+  ```ts
+  function isTransient(err: unknown): boolean {
+      const m = String(err).toLowerCase();
+      return m.includes('blockhash') || m.includes('timeout') ||
+             m.includes('network') || m.includes('socket');
+  }
+  ```
+  Only retry if `isTransient(err) === true`; otherwise throw immediately.
+  Terminal program errors (the ones already mapped in `mapConfirmError`)
+  should never be retried.
+
+#### Low
+
+- **L1. `hire.ts:71` returns `signature: ''` for the idempotency case.**
+  ```ts
+  if (existing) {
+      if (!('created' in existing.state)) {
+          throw new EscrowAlreadyExistsError(escrowPda.toBase58());
+      }
+      return { escrowPda, vaultPda, signature: '' };
+  }
+  ```
+  Empty-string signature breaks the documented `EscrowHandle` contract
+  (callers may try to look up the signature on a block explorer →
+  cryptic failure). Either fetch the actual creation tx signature from
+  account history, or change the field to `signature: string | null` and
+  document the `null` case as "already existed."
+
+- **L2. No ATA-existence preflight in `hire.ts`.** `getTokenAccountBalance`
+  on a non-existent ATA throws an opaque RPC error before the
+  `InsufficientFundsError` branch is even reachable. Users without USDC
+  funded yet get a confusing error message. A two-line preflight
+  (`getAccountInfo` on the ATA → throw a typed `BuyerHasNoUsdcAtaError`
+  with a hint to call `createAssociatedTokenAccount` first) would close
+  the gap.
+
+- **L3. Default nonce uses `Date.now()` millisecond precision.** Two
+  `hire()` calls in the same millisecond from the same buyer to the same
+  listing would derive the same escrow PDA → second call hits the L1
+  idempotency path silently. Extremely unlikely in practice but trivially
+  fixed by adding `crypto.randomBytes(4)` entropy. Tied to M1 above —
+  a deterministic-by-input nonce strategy supersedes both.
+
+- **L4. Error-code mapping covers only 3 of 11 escrow error codes.**
+  `escrow-utils.ts:81-97` maps 6000 (`Unauthorized`), 6005 (`DeadlinePassed`
+  / `EscrowExpired`), 6006 (`DeadlineNotYetPassed` / `EscrowNotExpired`)
+  — but the program has 11 error variants (per PR #51 audit + L1 fix
+  added `InvalidScore` → 6010). Codes 6001/6002/6003/6004/6007/6008/6009/6010
+  fall through to a generic `TransactionFailedError` with a
+  JSON-serialized blob. Users get worse error messages than they could.
+  Non-blocking; expand the map next PR.
+
+- **L5. No client-side check that `usdcMint` is a known canonical USDC.**
+  The `usdcMint` parameter (`hire.ts:39`, `confirm.ts:24`, `dispute.ts:23`,
+  `deliver.ts:23`, `claimTimeout.ts:20`) defaults to
+  `DEVNET_USDC_MINT` but accepts any `PublicKey`. The on-chain
+  `token::mint = vault.mint` constraints (post-PR #51) prevent
+  cross-mint theft, so this isn't exploitable — but a mis-integration
+  could create escrows funded with a worthless mint and the SDK would
+  send the tx without warning. A simple allowlist check (the two known
+  USDC mints — devnet `4zMM…JDncDU`, mainnet `EPjF…wyTDt1v`) with an
+  override flag for tests would close the door. Tied to the H1 carryforward
+  on the on-chain side from PR #51 — both client and program should bind
+  USDC by mainnet/devnet config.
+
+- **L6. SDK doesn't explicitly pass `escrow` and `vault` PDAs to
+  `createEscrow.accounts()` even though it derives them locally**
+  (`hire.ts:54-62`). It relies on Anchor's `accountsResolver` to derive
+  them from IDL seeds — which works today because Anchor's resolver can
+  use the `nonce` instruction arg to compute the escrow seeds, then chain
+  to the vault. But explicitly passing both as `escrow: escrowPda, vault:
+  vaultPda` in `.accounts({...})` is defense-in-depth (no surprise if the
+  resolver behavior changes across Anchor versions, no silent wrong-PDA
+  if the IDL gets out of sync) and costs nothing since the SDK already
+  derived them. Apply the same pattern to `confirm.ts`, `dispute.ts`,
+  `deliver.ts`, `claimTimeout.ts` for `vault` (they already pass
+  `escrow`). Non-blocking.
+
+#### Informational
+
+- **I1. `wallet as any` in `escrow-utils.ts:39`** — documented in the
+  biome-ignore comment ("Anchor's Wallet interface requires a payer
+  Keypair; structural AnchorWallet is compatible at runtime"). Fine.
+- **I2. `client.ts` PinataJWT secrecy is correct.** `#pinataJwt` is a
+  TC39 private field (not a TS-only `private` keyword), so it's truly
+  hidden from `JSON.stringify(client)` and from error-capture tooling
+  that walks own-properties. `toJSON()` (`client.ts:171-173`) only
+  exposes `wallet.publicKey.toBase58()` — no secrets, no full wallet
+  object, no RPC URL. Good hygiene; matches what we'd want for production
+  error-reporting integrations.
+- **I3. `claimTimeout.ts:34` rejects `'created' in escrow.state` with
+  `DeliveryNotSubmittedError`.** Aligns with the PR #51 on-chain check
+  (`claim_timeout` only allows `Delivered` → `TimeoutClaimed`, never
+  from `Created`) — correct behavior, fail-fast client-side.
+- **I4. State guards consistent across all 5 lifecycle methods.** Every
+  function does the same shape: parse pubkey → fetch escrow → check
+  expected state → throw typed error if not matching → build ix → send.
+  Easy to read, easy to extend, hard to break inconsistently. Good
+  pattern.
+- **I5. Tests use Vitest mocks throughout — no live Anchor program
+  invocation.** Adequate for the unit-coverage target (158 tests passing)
+  but means H1, M1, M2 regressions can land undetected. The qa-test-eng
+  E2E lifecycle harness (Task #18 pattern) should grow a `hire → deliver
+  → wait → claimTimeout` test against devnet so deadline-misuse-class
+  bugs surface in CI. Non-blocking for this PR; carryforward for
+  qa-test-eng.
+
+### Sanity-check answers (analogous to prior audits)
+
+1. ✅ **No hardcoded secrets.** Pass — no API keys / RPC URLs / private
+   keys; `pinataJwt` properly accepted via constructor and stored as a
+   TC39 private field. `ESCROW_PROGRAM_ID = EhFp…XxW2` is a public
+   program address, intentionally hardcoded as the cross-program trust
+   anchor (matches `declare_id!` in `bazaar-escrow` on main per PR #53).
+2. ✅ **No mainnet references.** Pass — `DEVNET_USDC_MINT = 4zMM…JDncDU`
+   is the documented devnet USDC; SDK accepts overrides via constructor
+   `usdcMint`. No mainnet RPC URL constants. (See L5 for the
+   client-side mint-allowlist nit.)
+3. ✅ **No admin-key footprint.** Pass — SDK is a thin client over the
+   on-chain escrow whose vault is PDA-controlled (PR #51 audit). The
+   SDK never holds custody, never computes admin authority, never bypasses
+   on-chain state guards. The only "authority" the SDK derives is the
+   buyer/seller's own keypair via the `AnchorWallet` interface.
+
+### Re-review plan
+
+1. **H1**: SDK passes `new BN(input.timeout)` directly (drop the
+   `Math.floor(Date.now()/1000) + ...` arithmetic). Test asserts
+   `createEscrow` called with `new BN(3600)` for `timeout: 3600` input.
+   I'll re-walk to confirm the BN value matches the relative-offset
+   semantics of the on-chain program.
+2. **M1**: Default nonce becomes deterministic per (buyer, listing,
+   coarse-time-bucket) OR JSDoc explicitly warns "pass `nonce` explicitly
+   for production retries." Either is acceptable for clearing the
+   carryforward; deterministic default is preferred.
+3. **M2**: `sendWithRetry` adds `isTransient(err)` gate; non-transient
+   errors throw immediately. Test that a `Custom: 6004`
+   (`InvalidStateTransition`) confirm-error fails after 1 attempt, not 3.
+4. L1-L6: addressable in this PR or follow-up; non-blocking.
+5. I5: qa-test-eng to add devnet `hire → claimTimeout` lifecycle test
+   in a follow-up PR (would have caught H1).
+
+**Verdict reiterated:** ❌ **BLOCK** on H1. devnet-blocker: YES (the
+timeout SLA is fundamental to the marketplace's value prop and breaks on
+every SDK-created escrow). mainnet-blocker: YES (additionally requires
+M1 + M2 fixes for production safety).
+
+The on-chain hardening from PR #51 paid off — the SDK only needs *parameter
+correctness* to be safe, and the bulk of attack surface is sealed off-chain.
+But H1 demonstrates the M1 audit pattern still applies: substantive walk
+catches the parameter bug that mocks miss.
+
+### Re-audit @ commit 6e55e01 — 2026-04-25
+**Verdict:** ⚠️ **CONDITIONAL APPROVE** — H1, M1, M2 substantive fixes are
+correct; the security gate is cleared. **Merge gate currently RED:** the
+H1 regression test fails the SDK typecheck (`tests/hire.test.ts:248,25 —
+TS2532 Object is possibly 'undefined'`), which fails CI. One-line test fix
+required before merge; not a security issue.
+
+**Walk of the fix commit:**
+
+- **H1 — relative-vs-absolute deadline param** ✅
+  - `hire.ts:79` removed the `deadlineSecs` local entirely. Now passes
+    `new BN(input.timeout)` directly with comment *"// relative seconds;
+    on-chain adds Clock.unix_timestamp"*. The misleading variable name
+    `deadlineSecs` is gone.
+  - Regression test (`tests/hire.test.ts:243-251`) now uses a
+    `vi.fn()`-based `mockCreateEscrow` that captures positional args:
+    ```ts
+    const deadlineArg = mockCreateEscrow.mock.calls[0][3];
+    expect(deadlineArg.toString()).toBe('3600');
+    ```
+    Asserts the BN value at arg index 3 equals `'3600'`. Any future
+    regression to `Date.now()/1000 + timeout` would surface as `'~1.745e9'`
+    and fail the test. ✅ The contract is now pinned.
+  - **CI fail (typecheck, not security):** `mockCreateEscrow.mock.calls[0]`
+    is typed as possibly-undefined under strict TS. Trivial fix:
+    ```ts
+    expect(mockCreateEscrow).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.anything(),
+        expect.anything(),
+        expect.objectContaining({ toString: expect.any(Function) }),
+        expect.anything(),
+    );
+    const deadlineArg = mockCreateEscrow.mock.calls[0]?.[3];
+    expect(deadlineArg?.toString()).toBe('3600');
+    ```
+    Or simpler: `expect(mockCreateEscrow.mock.calls[0]?.[3]?.toString()).toBe('3600');`
+    Or `mockCreateEscrow.mock.calls[0]![3]` with a non-null assertion if
+    the team's strict-null policy permits it (their other tests use
+    similar patterns).
+
+- **M2 — `isTransient(err)` retry gate** ✅
+  - `escrow-utils.ts:67-74` now early-throws on non-transient errors:
+    ```ts
+    } catch (err) {
+        const asError = err instanceof Error ? err : new Error(String(err));
+        if (!isTransient(err)) throw asError;
+        lastError = asError;
+    }
+    ```
+  - `isTransient(err)` (`escrow-utils.ts:83-91`):
+    ```ts
+    function isTransient(err: unknown): boolean {
+        if (err instanceof UnauthorizedError) return false;
+        if (err instanceof EscrowExpiredError) return false;
+        if (err instanceof EscrowNotExpiredError) return false;
+        if (err instanceof TransactionFailedError && err.signature !== undefined) return false;
+        return true;
+    }
+    ```
+  - Walk of the logic:
+    - 6000 (`Unauthorized`), 6005 (`EscrowExpired`/`DeadlinePassed`), 6006
+      (`EscrowNotExpired`/`DeadlineNotYetPassed`) — typed errors set by
+      `mapConfirmError`. Deterministic program rejections; no retry. ✅
+    - `TransactionFailedError` *with* `signature !== undefined` — set by
+      `mapConfirmError(err, signature)` when `result.value.err` is
+      populated. This means the tx confirmed but the program rejected
+      it. Deterministic; no retry. ✅
+    - Bare-throw `TransactionFailedError` at end of the function (no
+      signature) is NOT reached from inside the catch — it's the
+      post-loop throw after all attempts fail. So the `signature !==
+      undefined` discriminator correctly identifies "tx landed and
+      reverted" vs "tx never landed."
+    - Other unmapped program error codes (6001–6004, 6007–6010) flow
+      through `mapConfirmError`'s `default` branch into a
+      `TransactionFailedError(msg, signature)` — they ALSO carry a
+      signature, so they ALSO short-circuit. ✅ Even unmapped program
+      errors won't burn priority-fee retries.
+    - Anything else (network errors, blockhash expiry, signing failures,
+      generic `Error` from `sendRawTransaction`) returns `true` →
+      retried. ✅
+  - Note: this also closes the L4 carryforward by accident — unmapped
+    program error codes are now correctly NOT retried even though they're
+    still wrapped in `TransactionFailedError` rather than typed errors.
+    L4 (expanding the typed error map) can ship later without urgency.
+
+- **M1 — JSDoc warning** ✅ (acceptable approach)
+  - `client.ts:99-105`:
+    > **Production retry safety**: if `hire()` throws after an ambiguous
+    > network failure (tx may have landed but confirmation timed out),
+    > calling `hire()` again with a new `Date.now()`-derived nonce
+    > creates a second escrow and a second USDC deposit. Pass an
+    > explicit `input.nonce` derived from stable inputs (buyer + listing
+    > + budget) so that retries resolve to the same PDA and the
+    > idempotency path is taken instead.
+  - This is the lighter of the two fixes I proposed (documentation vs
+    deterministic-by-input default). On reflection, it's actually the
+    *better* fix: deterministic default would prevent the legitimate use
+    case of two distinct hires for the same buyer+listing+budget combo
+    (e.g., two separate jobs from the same agent). Leaving the choice
+    explicit is correct API design. The JSDoc text is direct and gives
+    the workaround. ✅
+  - Mild concern: callers who don't read JSDoc still hit the bug. For
+    a future SDK polish PR, consider making the default nonce throw a
+    `console.warn()` or a typed warning event — but this is non-blocking.
+
+**Sanity-check answers (unchanged from initial audit):**
+
+1. ✅ No hardcoded secrets — `pinataJwt` properly accepted via
+   constructor and stored as TC39 private field.
+2. ✅ No mainnet references — `DEVNET_USDC_MINT` documented; constructor
+   accepts override.
+3. ✅ No admin-key footprint — SDK is a thin client; never holds custody.
+
+**Carryforward to qa-test-eng (unchanged):**
+
+- I5 — devnet `hire → deliver → wait → claimTimeout` lifecycle E2E test
+  in the Task #18 harness. Would have caught H1 immediately.
+
+**Verdict:** ⚠️ **CONDITIONAL APPROVE** — security gate cleared (H1 + M2
+fixed substantively, M1 documented). Final merge gate requires the
+trivial typecheck fix (`tests/hire.test.ts:248`). Once CI is green I'll
+flip to unconditional ✅ APPROVE without a second walk — the substantive
+diff is already accepted.
