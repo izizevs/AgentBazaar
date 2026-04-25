@@ -4218,3 +4218,271 @@ Carryforwards (non-blocking, both to qa-test-eng Task #45):
 - **L2**: monitor compute-unit usage on `confirm_delivery` post-deploy;
   add `requestUnitsLimit(300_000)` if any future change adds another CPI
   to this path.
+
+---
+
+## PR #69 — Task #36 USDC mint canonical binding in bazaar-escrow
+
+**Reviewer:** security-auditor
+**Date:** 2026-04-25
+**Branch:** `feature/anchor-usdc-mint-constraint` → `main`
+**Head SHA:** `7f2ddb76e680805acfa603da2729926bf49af0b5`
+**CI status:** ✅ green (run 24943051436 — Lint + typecheck + test)
+**Closes:** PR #51 H1 audit finding (per-cluster USDC mint not enforced
+on devnet → buyer could fund escrow with arbitrary mint and trap funds
+or grief settlement)
+
+### Scope
+
+This is the mainnet release-gate fix for the H1 finding that has been
+open since the original escrow audit. The PR introduces a per-cluster
+canonical USDC mint constant and applies an `address = USDC_MINT`
+constraint everywhere the program touches a token account or mint
+account. After this lands, every escrow created on a given cluster is
+provably denominated in canonical USDC; any attempt to substitute a
+fake / look-alike mint fails at account deserialization with
+`ConstraintAddress` before any state mutation or token transfer.
+
+Diff: +146 / −17 across 6 files (1 keypair fixture, 1 test addition,
+1 program change, 2 Cargo manifests, 1 SDK biome-ignore reflow).
+
+### Changes audited
+
+**1. Per-cluster USDC mint constants (`programs/bazaar-escrow/src/lib.rs`):**
+
+```rust
+#[cfg(feature = "devnet")]
+pub const USDC_MINT: Pubkey = pubkey!("4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU");
+#[cfg(feature = "testing")]
+pub const USDC_MINT: Pubkey = pubkey!("8VEVN5sJUzqN3ddkJV9gYMbLBnmAxUXsC5CDDU9WFwzE");
+#[cfg(not(any(feature = "devnet", feature = "testing")))]
+pub const USDC_MINT: Pubkey = pubkey!("EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v");
+```
+
+- ✅ **Mainnet (default-no-features) USDC mint** —
+  `EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v` is Circle's canonical
+  Solana mainnet-beta USDC and matches the address published in
+  Circle's developer docs and OFAC compliance reports.
+- ⚠️ **Devnet USDC mint** —
+  `4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU` matches Circle's CCTP
+  devnet USDC. There is also an older devnet USDC
+  (`Gh9ZwEmdLJ8DscKNTkTqPbNwLNNBjuSzaG9Vp2KGtKJr`) widely used by
+  legacy tooling; team-lead should confirm devnet payment flows
+  (faucet, indexer fixtures, dashboard) all target the CCTP variant
+  and document the choice in an ADR. Non-blocking; not on the
+  fund-safety surface.
+- ✅ **Testing USDC mint** —
+  `8VEVN5sJUzqN3ddkJV9gYMbLBnmAxUXsC5CDDU9WFwzE` matches the keypair
+  in `programs/tests/fixtures/test-usdc-mint.json` (verified by
+  reconstructing the public key from bytes 32–63 of the secret-key
+  array → `bs58.encode` → exact match). Tests load this fixture and
+  pass it to `createMint(... mintKp)` so the resulting mint address is
+  deterministic and equal to the constant, allowing `address`
+  constraints to succeed under the `default = ["testing"]` feature
+  flag.
+
+**2. `address = USDC_MINT` walk-through over every Accounts struct:**
+
+| Struct | Field | Constraint applied | Notes |
+|---|---|---|---|
+| `CreateEscrow` | `vault` | `token::mint = usdc_mint` (init) | Vault is fresh; mint binding is locked at creation. |
+| `CreateEscrow` | `buyer_token_account` | `token::mint = usdc_mint` | H2 fix preserved; now mint pinned to canonical. |
+| `CreateEscrow` | `usdc_mint` | **`address = USDC_MINT`** + `Account<Mint>` | Was `AccountInfo<'info>`; now strongly typed Mint with address pin. |
+| `SellerAction` | `vault` | `token::mint = usdc_mint` (newly added) | Closes prior gap — vault was previously bound only by PDA seeds. |
+| `SellerAction` | `seller_token_account` | `token::mint = usdc_mint` (was `vault.mint`) | Stronger: now compares against canonical, not vault state. |
+| `SellerAction` | `usdc_mint` | **`address = USDC_MINT`** | New required account on `submit_delivery` and `claim_timeout`. |
+| `BuyerAction` | `vault` | `token::mint = usdc_mint` (newly added) | Closes prior gap. |
+| `BuyerAction` | `buyer_token_account` | `token::mint = usdc_mint` (was `vault.mint`) | Stronger. |
+| `BuyerAction` | `usdc_mint` | **`address = USDC_MINT`** | New required account on `open_dispute`. |
+| `ConfirmDelivery` | `vault` | `token::mint = usdc_mint` (newly added) | Closes prior gap. |
+| `ConfirmDelivery` | `seller_token_account` | `token::mint = usdc_mint` (was `vault.mint`) | Stronger. |
+| `ConfirmDelivery` | `buyer_token_account` | `token::mint = usdc_mint` (was `vault.mint`) | Stronger. |
+| `ConfirmDelivery` | `usdc_mint` | **`address = USDC_MINT`** | New required account on `confirm_delivery`. |
+
+✅ **Every `Account<TokenAccount>` field in every Accounts struct is
+now constrained to the canonical USDC mint.** The only `TokenAccount`
+fields in the program live in these four contexts; nothing else
+touches `token::mint`. No exceptions.
+
+**3. Constraint-syntax correctness (Anchor v0.31.1):**
+- `address = <const>` is the documented Anchor 0.31 way to pin an
+  account to a known address. Anchor expands this into a deserialization
+  check that returns `ConstraintAddress` on mismatch *before* the
+  instruction body executes. ✅
+- `token::mint = usdc_mint` references the in-context account, and
+  Anchor's expansion verifies that the token account's stored `mint`
+  field equals `usdc_mint.key()`. Combined with `address = USDC_MINT`
+  on `usdc_mint`, this transitively enforces the canonical mint on
+  every token account. ✅
+- `usdc_mint: Account<'info, Mint>` strengthens the type from the
+  prior `AccountInfo` — this adds an SPL Token program ownership check
+  *and* requires the account data to deserialize as a Mint, so a random
+  account at the canonical address would also be rejected. (Defense
+  in depth — the address pin alone is sufficient, but the typed
+  account closes the trivial spoof too.) ✅
+
+**4. Negative test (`programs/tests/bazaar-escrow.ts`):**
+- `it('rejects create_escrow with wrong USDC mint (ConstraintAddress)')`
+  - Spawns a fresh keypair, mints a token at that address, builds a
+    buyer ATA against the fake mint, then calls `create_escrow` with
+    the fake mint as `usdcMint`.
+  - Asserts the call rejects with `/ConstraintAddress/`.
+  - ✅ Exercises the constraint at the failing-path level for the
+    first instruction. The remaining three instructions
+    (`submit_delivery`, `confirm_delivery`, `open_dispute`,
+    `claim_timeout`) don't get a dedicated negative test, but they
+    use the same `address = USDC_MINT` constraint generated by the
+    same Anchor macro path — proving rejection on `CreateEscrow` is
+    a valid representative for the constraint's correctness.
+    (Carryforward L3 below.)
+
+**5. Existing tests still pass:**
+- All ~20 prior happy-path and negative tests now thread an
+  additional `usdcMint` field through their `accounts({...})` calls.
+  Mechanical churn only; no behavior change.
+- CI run `24943051436` is green on the Lint + typecheck + test job.
+- Local `cargo check` confirms all three feature combos compile
+  cleanly:
+  - `--no-default-features --features devnet` (devnet binary) ✅
+  - `--no-default-features` (mainnet binary) ✅
+  - default = `["testing"]` (test binary) ✅
+
+**6. Bypass-resistance audit:**
+- `usdc_mint` field is not `mut` and not `init` — Anchor cannot
+  reassign or recreate it; the `address` check happens during
+  `try_accounts` before the instruction body runs.
+- There is no remaining `AccountInfo` / `UncheckedAccount` fallback
+  for any token-account / mint field — every reference to the canonical
+  mint goes through the typed-account path.
+- The mint constant is a compile-time `pubkey!()` — not loaded from
+  any sysvar, account data, or user-supplied input. No way to swap it
+  at runtime short of a program upgrade (gated by the Squads 2-of-3).
+- The four PDA-signer code paths (`create_escrow`, `submit_delivery`,
+  `confirm_delivery`, `claim_timeout`, `open_dispute`) all use
+  `vault_seeds: [b"vault", escrow.key(), &[vault_bump]]` — unchanged
+  from prior audits. The mint constraint cannot influence the signer
+  derivation.
+- No new admin keys or withdrawal authorities. The `usdc_mint` account
+  is read-only and structurally incapable of authorizing token
+  movement.
+
+### Findings
+
+- **Critical:** none.
+- **High:** none.
+- **Medium:**
+  - **M1 (recommendation, not finding). `default = ["testing"]` is a
+    deployment footgun.** Anyone running plain `anchor build` (without
+    `--no-default-features`) produces a binary that pins the *test*
+    mint as USDC. The current Cargo.toml comment is explicit, but a
+    deploy-time slip would silently produce a broken devnet/mainnet
+    binary that would still build, deploy, and only fail at the first
+    user `create_escrow` call (with `ConstraintAddress` against a mint
+    that doesn't exist on that cluster). Two options for hardening,
+    either of which closes the footgun:
+      1. Flip the polarity: make `default = []` (mainnet by default)
+         and require `anchor test` to pass `--features testing`. The
+         Cargo workspace's `[features]` block already supports this;
+         the `anchor.toml` test runner can be adjusted to pass the
+         flag.
+      2. Add a CI job that diff-checks the deployed program binary's
+         embedded mint constant against the cluster being deployed to
+         (e.g., a post-build script that disassembles the .so and
+         greps for the expected pubkey bytes).
+    Tracked as a non-blocker for this PR (the per-cluster pin itself
+    is correct); should land before mainnet deploy.
+- **Low:**
+  - **L3. Negative tests cover only `create_escrow`.** The other four
+    instructions (`submit_delivery`, `claim_timeout`, `open_dispute`,
+    `confirm_delivery`) gain a required `usdc_mint` account but
+    aren't individually exercised with a wrong mint. Anchor's macro
+    expansion guarantees the same constraint behavior across all
+    four, so this is unlikely to mask a bug — but a parameterized
+    negative test (table-driven over the four instructions) would
+    push to defense-in-depth. Carryforward to qa-test-eng Task #45.
+  - **L4. `usdc_mint` field added to `SellerAction` / `BuyerAction` /
+    `ConfirmDelivery` widens the Accounts list for SDK callers.**
+    `packages/sdk/src/confirm.ts` was reflowed to satisfy biome's
+    no-explicit-any rule, but the SDK helpers `bazaar.deliver()`,
+    `bazaar.claimTimeout()`, `bazaar.dispute()`, `bazaar.confirm()`
+    will need their `accounts({...})` payloads updated to thread
+    `usdcMint` through. Not in this PR's scope. Already tracked under
+    Task #36 (devnet upgrade-in-place). The SDK lifecycle E2E suite
+    in `tests/e2e/` will fail until updated. Carryforward.
+- **Informational:**
+  - **I5. Cargo feature flag set is now**
+    `[default, devnet, testing, cpi, no-entrypoint, no-idl]`. The
+    feature comment in `Cargo.toml` is the only deploy-time
+    documentation; consider mirroring into `docs/decisions/` as an ADR
+    so the per-cluster build invocation lives somewhere a deploy
+    operator will find it. Cosmetic.
+  - **I6. Test fixture keypair `test-usdc-mint.json` is committed in
+    plaintext.** This is correct — the keypair is a deterministic
+    test-only artifact whose pubkey *must* match the `testing`
+    constant. It has no production funds, no production authority, and
+    its leak is intentional (so `cargo build` + `anchor test` are
+    deterministic across machines). Worth a one-line note in the
+    fixture's surrounding directory README that this file is
+    *expected* to be public, so a future security-conscious reader
+    doesn't try to "fix" it. Cosmetic.
+  - **I7. PR title references "Task #36"; live TaskList currently
+    has Task #34 = "USDC mint canonical binding in bazaar-escrow"
+    and Task #35/36 are renamed/devnet-upgrade items.** Same
+    task-number drift pattern as PRs #65 / #67. Cosmetic.
+
+### Sanity-check answers (mainnet release-gate)
+
+1. ✅ **Per-cluster USDC mint pinned at compile time.** No runtime
+   path can substitute the mint; only a program upgrade (Squads 2-of-3)
+   can change it.
+2. ✅ **No new admin keys / withdrawal authorities.** `usdc_mint` is
+   read-only; the four `token::transfer` CPIs still use the
+   `[b"vault", escrow_key]` PDA as authority — unchanged.
+3. ✅ **No bypass via `mut` / unchecked fallback.** All four
+   `Accounts` structs cover every mint-bearing account; no fallback
+   to `AccountInfo` / `UncheckedAccount` for any of them.
+4. ✅ **No regression in prior fixes.** C1 (escrow_authority +
+   `seeds::program`), C2 / H2 (token::mint + token::authority on
+   external token accounts), L1 / L2 / M1 (compute_severity clamp),
+   state-machine guards — all preserved. The token::mint constraints
+   on external token accounts are *strengthened* (vault.mint →
+   usdc_mint), which transitively also pins them to the canonical
+   address.
+5. ✅ **CI green at review time.**
+6. ✅ **Closes PR #51 H1 finding.** The H1 was specifically "no
+   per-cluster USDC mint enforcement"; this PR adds it for all five
+   instructions covering all four token-account roles
+   (vault, buyer ATA, seller ATA, buyer-refund ATA).
+
+### Verdict
+
+✅ **APPROVE for merge.**
+
+PR #69 closes the mainnet release-gate H1 finding from PR #51 cleanly
+and tightly. Every token-account-bearing field in every Accounts struct
+is now constrained to the canonical USDC mint via the `address = USDC_MINT`
++ `token::mint = usdc_mint` pattern. The three per-cluster constants
+are correctly chosen (mainnet matches Circle canonical; testing matches
+the committed fixture keypair; devnet matches Circle CCTP devnet). The
+negative test exercises the constraint on `create_escrow` and proves
+`ConstraintAddress` rejects pre-state-mutation. CI is green and all
+three feature builds compile locally without errors.
+
+Carryforwards (non-blocking):
+- **M1 (recommended pre-mainnet):** flip `default = ["testing"]` to
+  `default = []` so plain `anchor build` produces a mainnet binary,
+  *or* add a CI job that asserts the deployed binary's embedded mint
+  matches the target cluster. Open a follow-up issue before mainnet
+  cutover.
+- **L3 (qa-test-eng Task #45):** parameterized negative-mint test
+  across the four non-create instructions.
+- **L4 (anchor-eng / sdk-eng — Task #36):** SDK lifecycle helpers
+  need to thread `usdcMint` into the four affected instruction
+  account payloads; E2E suite must be re-run before devnet
+  upgrade-in-place lands.
+- **I5 (docs):** ADR for per-cluster build invocation
+  (`anchor build --no-default-features [--features devnet]`).
+- **I6 (fixtures):** one-line note that `test-usdc-mint.json`
+  plaintext keypair is intentionally public.
+- **I7 (cosmetic):** PR title task-number drift; harmless.
+
