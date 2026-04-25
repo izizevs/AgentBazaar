@@ -1,7 +1,7 @@
 /**
  * Fire a synthetic Helius webhook event to the indexer's webhook endpoint.
- * Useful for integration tests that need to trigger the event handler without
- * waiting for a real on-chain event to be picked up by Helius.
+ * The payload envelope matches HeliusEventSchema from apps/indexer/src/webhooks/types.ts
+ * so it passes the indexer's safeParse validation and reaches the event handler.
  */
 
 export interface ServiceListingCreatedPayload {
@@ -23,28 +23,66 @@ export interface ServiceListingCreatedPayload {
   isActive: boolean;
   /** Transaction signature. */
   signature: string;
+  /** Slot this transaction landed in. */
+  slot: number;
+  /** Unix timestamp (seconds). */
+  timestamp: number;
 }
 
 /**
  * POST a synthetic `ServiceListingCreated` event to the indexer webhook endpoint.
- * Uses the HELIUS_WEBHOOK_SECRET for the Authorization header, matching how the
- * real Helius service authenticates its deliveries.
+ * Wraps the app-specific payload in a Helius enhanced-transaction envelope so it
+ * passes the indexer's HeliusWebhookPayloadSchema.safeParse() and reaches the
+ * event handler (Task #13).  App-specific data lives in `events.ServiceListingCreated`.
  *
  * @param webhookUrl - Full URL of the indexer's /webhook endpoint
- * @param secret     - Value of HELIUS_WEBHOOK_SECRET (the full "Bearer ..." string)
- * @param payload    - Event data to send
+ * @param secret     - Full Authorization header value (e.g. "Bearer <token>")
+ * @param payload    - Service listing event data
  */
 export async function fireServiceListingCreated(
   webhookUrl: string,
   secret: string,
   payload: ServiceListingCreatedPayload,
 ): Promise<Response> {
-  const body = JSON.stringify([
-    {
-      type: 'ServiceListingCreated',
-      ...payload,
+  const heliusEvent = {
+    description: `ServiceListingCreated by ${payload.owner}`,
+    type: 'UNKNOWN',
+    source: 'SYSTEM_PROGRAM',
+    fee: 5000,
+    feePayer: payload.owner,
+    signature: payload.signature,
+    slot: payload.slot,
+    timestamp: payload.timestamp,
+    nativeTransfers: [],
+    tokenTransfers: [],
+    accountData: [
+      {
+        account: payload.listingAddress,
+        nativeBalanceChange: 0,
+        tokenBalanceChanges: [],
+      },
+    ],
+    transactionError: null,
+    instructions: [
+      {
+        accounts: [payload.owner, payload.listingAddress],
+        data: '',
+        programId: payload.programId,
+        innerInstructions: [],
+      },
+    ],
+    events: {
+      ServiceListingCreated: {
+        listingAddress: payload.listingAddress,
+        owner: payload.owner,
+        capabilityHash: payload.capabilityHash,
+        metadataUri: payload.metadataUri,
+        priceUsdc: payload.priceUsdc,
+        pricingModel: payload.pricingModel,
+        isActive: payload.isActive,
+      },
     },
-  ]);
+  };
 
   const response = await fetch(webhookUrl, {
     method: 'POST',
@@ -52,7 +90,7 @@ export async function fireServiceListingCreated(
       'Content-Type': 'application/json',
       Authorization: secret,
     },
-    body,
+    body: JSON.stringify([heliusEvent]),
   });
 
   if (!response.ok) {
