@@ -1,13 +1,20 @@
 import type { Context } from 'hono';
 import { getSql } from '../db/client.js';
 import { decodeRegistryEvent } from '../events/decoder.js';
+import { decodeEscrowEvent } from '../events/escrow-decoder.js';
+import { onDeliverySubmitted } from '../events/on-delivery-submitted.js';
+import { onDisputeOpened } from '../events/on-dispute-opened.js';
+import { onEscrowCreated } from '../events/on-escrow-created.js';
+import { onEscrowStateChanged } from '../events/on-escrow-state-changed.js';
 import { onListingCreated } from '../events/on-listing-created.js';
 import { onListingUpdated } from '../events/on-listing-updated.js';
+import { onSlaReport } from '../events/on-sla-report.js';
 import { logger } from '../logger.js';
 import { verifyHeliusAuth } from './auth.js';
 import { HeliusWebhookPayloadSchema } from './types.js';
 
 const BAZAAR_REGISTRY_PROGRAM_ID = 'GJRgCCqkYvAezidpdd3i4p4kRRfJnM1EfGfgqYgchQqd';
+const BAZAAR_ESCROW_PROGRAM_ID = 'EhFptDs4mz6rt7HDmt8pB7ZogiqxUMVhpjB3NvToXxW2';
 
 export async function handleHeliusWebhook(c: Context): Promise<Response> {
   if (!verifyHeliusAuth(c)) {
@@ -54,29 +61,58 @@ export async function handleHeliusWebhook(c: Context): Promise<Response> {
 
   for (const tx of newEvents) {
     const isRegistryTx = tx.instructions.some((ix) => ix.programId === BAZAAR_REGISTRY_PROGRAM_ID);
-    if (!isRegistryTx) continue;
+    const isEscrowTx = tx.instructions.some((ix) => ix.programId === BAZAAR_ESCROW_PROGRAM_ID);
+    if (!isRegistryTx && !isEscrowTx) continue;
 
     relevant++;
 
     // Decode Anchor events from inner instructions (emit_cpi! self-CPIs).
     for (const ix of tx.instructions) {
-      if (ix.programId !== BAZAAR_REGISTRY_PROGRAM_ID) continue;
-      for (const inner of ix.innerInstructions) {
-        if (inner.programId !== BAZAAR_REGISTRY_PROGRAM_ID) continue;
-        const event = decodeRegistryEvent(inner.data);
-        if (!event) continue;
+      if (ix.programId === BAZAAR_REGISTRY_PROGRAM_ID) {
+        for (const inner of ix.innerInstructions) {
+          if (inner.programId !== BAZAAR_REGISTRY_PROGRAM_ID) continue;
+          const event = decodeRegistryEvent(inner.data);
+          if (!event) continue;
 
-        try {
-          if (event.name === 'ServiceListingCreated') {
-            await onListingCreated(tx.signature, event.data);
-          } else if (event.name === 'ServiceListingUpdated') {
-            await onListingUpdated(tx.signature, event.data);
+          try {
+            if (event.name === 'ServiceListingCreated') {
+              await onListingCreated(tx.signature, event.data);
+            } else if (event.name === 'ServiceListingUpdated') {
+              await onListingUpdated(tx.signature, event.data);
+            }
+          } catch (err) {
+            logger.error(
+              { err, txSignature: tx.signature, event: event.name },
+              'registry event handler failed',
+            );
           }
-        } catch (err) {
-          logger.error(
-            { err, txSignature: tx.signature, event: event.name },
-            'event handler failed',
-          );
+        }
+      }
+
+      if (ix.programId === BAZAAR_ESCROW_PROGRAM_ID) {
+        for (const inner of ix.innerInstructions) {
+          if (inner.programId !== BAZAAR_ESCROW_PROGRAM_ID) continue;
+          const event = decodeEscrowEvent(inner.data);
+          if (!event) continue;
+
+          try {
+            if (event.name === 'EscrowCreated') {
+              await onEscrowCreated(tx.signature, event.data);
+            } else if (event.name === 'EscrowStateChanged') {
+              await onEscrowStateChanged(tx.signature, event.data);
+            } else if (event.name === 'DeliverySubmitted') {
+              await onDeliverySubmitted(tx.signature, event.data);
+            } else if (event.name === 'SLAReport') {
+              await onSlaReport(tx.signature, event.data);
+            } else if (event.name === 'DisputeOpened') {
+              await onDisputeOpened(tx.signature, event.data);
+            }
+          } catch (err) {
+            logger.error(
+              { err, txSignature: tx.signature, event: event.name },
+              'escrow event handler failed',
+            );
+          }
         }
       }
     }
