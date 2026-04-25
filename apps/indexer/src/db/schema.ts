@@ -7,6 +7,7 @@ import {
   integer,
   jsonb,
   pgTable,
+  smallint,
   text,
   timestamp,
 } from 'drizzle-orm/pg-core';
@@ -65,6 +66,19 @@ export const serviceListings = pgTable(
     // updated_at is indexer-side: set on every upsert.
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+
+    // Migration #2 — populated by the ServiceListingCreated event handler (Task #15)
+    // after fetching IPFS metadata from metadataUri.
+
+    // Human-readable capability string; its SHA-256 is the on-chain capability_hash.
+    // Nullable until the indexer processes the creation event and fetches IPFS metadata.
+    capability: text('capability'),
+
+    // Denormalized reputation score (0–100). Starts at 0; updated by evaluation events in M1.
+    reputationScore: smallint('reputation_score').notNull().default(0),
+
+    // Agent endpoint URL from IPFS metadata. Nullable — not all listings expose one in M0.
+    endpoint: text('endpoint'),
   },
   (t) => [
     // Exact-match index for capability_hash lookup (Discovery API filter).

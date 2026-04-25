@@ -8,6 +8,13 @@
       "when": 1777116311732,
       "tag": "0000_third_living_lightning",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1777117384221,
+      "tag": "0001_mean_landau",
+      "breakpoints": true
     }
   ]
 }
