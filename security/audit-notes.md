@@ -2082,3 +2082,117 @@ correct, the issues are around implementation tightness rather
 than gaps. Solid work; the discipline patterns from earlier audits
 (fail-fast, Zod-first, structured logging, no-secrets-in-logs) all
 carry through cleanly.
+
+---
+
+## PR #38 — feature/qa-test-infra — 2026-04-25 (light audit)
+**Verdict:** APPROVED. No findings; two informational observations.
+Test scaffolding PR (`@agentbazaar/tests` package) — no production
+code, no on-chain mutations beyond test-owned mint, no signed
+flows beyond test keypairs.
+
+**Scope walked:**
+- `tests/fixtures/wallets.ts` (new, +34) — `createFundedWallets` via devnet airdrop
+- `tests/fixtures/usdc-mint.ts` (new, +105) — test SPL mint deploy + mint-to-wallets
+- `tests/mocks/helius-webhook.ts` (new, +65) — synthetic webhook POST helper
+- `tests/mocks/sati.ts` (new, +25) — canned 0-reputation stub
+- `tests/mocks/x402.ts` (new, +32) — accept-all payment stub
+- `tests/helpers/state-assertions.ts` (new, +45) — on-chain ServiceListing assertions
+- `tests/helpers/tx-utils.ts` (new, +62) — PDA derivation + read-only Anchor program builder
+- `tests/e2e/register-discover.test.ts` (new, +14) — currently a `todo` placeholder
+- `tests/package.json`, `tests/tsconfig.json`, `pnpm-workspace.yaml`,
+  `pnpm-lock.yaml`
+
+**Three sanity-check answers (qa-test-eng's checklist):**
+
+1. ✅ **No hardcoded secrets.**
+   - `helius-webhook.ts::fireServiceListingCreated(webhookUrl, secret, payload)`
+     accepts `secret` as a parameter from the caller. Never reads
+     `process.env['HELIUS_WEBHOOK_SECRET']`. Authorization header is
+     set from the caller-provided value — caller passes the same
+     `Bearer ...` value the indexer was started with.
+   - All keypairs ephemeral via `Keypair.generate()` — no static
+     keypair files, no private keys in source.
+   - `sati.ts` and `x402.ts` mocks return canned data — no env
+     reads, no secrets.
+   - Helpers don't read env at all.
+   - `package.json` has no `preinstall`/`install`/`postinstall`
+     scripts; the four scripts (`test`, `test:e2e`, `typecheck`,
+     `lint`) all read source/test paths only.
+
+2. ✅ **No mainnet references.**
+   - `wallets.ts` uses `connection.requestAirdrop(...)` — devnet/
+     testnet only.
+   - `tx-utils.ts` hardcodes
+     `REGISTRY_PROGRAM_ID = 'GJRgCCqkYvAezidpdd3i4p4kRRfJnM1EfGfgqYgchQqd'`
+     (devnet). No `mainnet-beta` strings, no mainnet RPC URLs.
+   - `e2e` test header explicitly says "Hits devnet directly".
+   - See O2 below for the per-cluster carryover note.
+
+3. ✅ **No admin-key footprint.**
+   - The test SPL mint authority is `payer.keypair` — a per-test-run
+     ephemeral keypair from `createFundedWallets`. Cannot withdraw
+     from any escrow vault (escrow doesn't exist in M0); controls
+     a test-owned mint only. The keypair leaves scope at test
+     teardown.
+   - No "upgrade authority" pattern, no "admin signer" abstractions,
+     no Squads multisig stubs.
+   - The `noopWallet` in `buildRegistryProgram` uses
+     `PublicKey.default` (32 zero bytes) and stub sign methods —
+     read-only program access.
+
+**Two informational observations (not findings):**
+
+- **O1. `fireServiceListingCreated` payload doesn't match the
+  indexer's `HeliusWebhookPayloadSchema`.** The mock sends:
+  ```ts
+  body: JSON.stringify([
+    { type: 'ServiceListingCreated', ...payload }
+  ])
+  ```
+  But the real Helius payload (per
+  `apps/indexer/src/webhooks/types.ts`) requires `description`,
+  `type` (Helius's tx-type enum, not a custom event name), `source`,
+  `fee`, `feePayer`, `signature`, `slot`, `timestamp`,
+  `accountData`, `instructions`. The mock's body would fail
+  `HeliusWebhookPayloadSchema.safeParse(...)` and return 400 from
+  the indexer.
+
+  Currently invisible because `tests/e2e/register-discover.test.ts`
+  is `todo` — no test exercises the mock yet. **When Task #18
+  wires the e2e test**, the mock needs to wrap the
+  `ServiceListingCreated` content inside a real `HeliusEventSchema`
+  envelope (with stub values like `description: 'mock'`,
+  `accountData: []`, `instructions: [{ programId:
+  REGISTRY_PROGRAM_ID, accounts: [], data: '', innerInstructions:
+  [] }]`, etc.).
+
+  Functional issue, not security. Flag for qa-test-eng before
+  Task #18.
+
+- **O2. `tx-utils.ts` hardcodes the devnet program ID.** Same
+  forward carryover as PR #30 O2 — fine for now (tests are
+  devnet-only by design). When the SDK + tests grow per-cluster
+  constants for mainnet support, this hardcode needs the same
+  cluster-aware lookup. Tracked.
+
+**Why this PR is clean (no findings):**
+
+1. **No on-chain mutations** outside test-owned state. The mint
+   helper writes to a test-owned mint with a test-owned authority;
+   no production state touched.
+2. **No signing except test-controlled keypairs.** Test wallets
+   are ephemeral. No path that could exfiltrate user keys.
+3. **Mocks are accept-all stubs**, not adversarial. SATI mock
+   returns 0 reputation; x402 mock always accepts. Nothing to
+   leak — no real data behind them.
+
+**Cross-cutting context:** This PR sets up the harness; substance
+comes when Task #18 wires the helpers together. That's where the
+next audit walks the full chain: SDK register → on-chain registry
+→ indexer webhook delivery (using the corrected mock from O1) →
+discover with API + RPC fallback. Pattern continuity will matter
+there.
+
+**Mainnet release-gate verdict:** N/A — test scaffolding never
+ships to npm or production deploys. Cleared to merge.
