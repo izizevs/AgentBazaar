@@ -49,9 +49,10 @@ function mockOkResponse(services: ServiceProvider[]) {
           minUptimePct: s.sla.minUptimePct ?? null,
           responseFormat: s.sla.responseFormat ?? null,
           jsonSchemaUri: s.sla.jsonSchemaUri ?? null,
-          customParams: s.sla.customParams ?? null,
+          // omit customParams when not set — API returns array or omits the field, never null
+          ...(s.sla.customParams !== undefined ? { customParams: s.sla.customParams } : {}),
         },
-        endpoint: s.endpoint,
+        endpoint: s.endpoint ?? 'https://agent.example.com',
         reputation: s.reputation,
         jobsCompleted: s.jobsCompleted,
         isActive: s.isActive,
@@ -66,6 +67,24 @@ function mockErrorResponse(status = 500, statusText = 'Internal Server Error') {
 
 function mockNetworkError(message = 'connect ECONNREFUSED') {
   return vi.fn().mockRejectedValue(new Error(message));
+}
+
+function mockMalformedJsonResponse() {
+  return vi.fn().mockResolvedValue({
+    ok: true,
+    json: async () => {
+      throw new SyntaxError('Unexpected token');
+    },
+  });
+}
+
+function mockInvalidSchemaResponse() {
+  return vi.fn().mockResolvedValue({
+    ok: true,
+    json: async () => ({
+      services: [{ listing: 'bad', endpoint: 'javascript:alert(1)', priceUsdc: 'not-a-number' }],
+    }),
+  });
 }
 
 // ─── RPC mock ────────────────────────────────────────────────────────────────
@@ -266,6 +285,30 @@ describe('discoverServices — Discovery API path', () => {
     const results = await discoverServices(connection, wallet, {}, apiUrl);
     expect(results).toEqual([]);
   });
+
+  it('M1: falls back to RPC on malformed JSON (SyntaxError → DiscoveryAPIError)', async () => {
+    vi.stubGlobal('fetch', mockMalformedJsonResponse());
+    setRpcListings([]);
+
+    const results = await discoverServices(connection, wallet, {}, apiUrl);
+    expect(results).toEqual([]);
+  });
+
+  it('M1: falls back to RPC on invalid API response schema (javascript: endpoint rejected)', async () => {
+    vi.stubGlobal('fetch', mockInvalidSchemaResponse());
+    setRpcListings([]);
+
+    const results = await discoverServices(connection, wallet, {}, apiUrl);
+    expect(results).toEqual([]);
+  });
+
+  it('L1: bad baseUrl TypeError → DiscoveryAPIError → RPC fallback fires', async () => {
+    vi.stubGlobal('fetch', mockOkResponse([]));
+    setRpcListings([]);
+
+    const results = await discoverServices(connection, wallet, {}, 'not a url');
+    expect(results).toEqual([]);
+  });
 });
 
 describe('discoverServices — RPC fallback', () => {
@@ -287,6 +330,12 @@ describe('discoverServices — RPC fallback', () => {
     const results = await discoverServices(connection, wallet, {}, apiUrl);
     expect(results).toHaveLength(1);
     expect(results[0]!.isActive).toBe(true);
+  });
+
+  it('L5: sets endpoint to undefined (stored in IPFS metadata, not on-chain)', async () => {
+    setRpcListings([makeRpcListing({ isActive: true })]);
+    const results = await discoverServices(connection, wallet, {}, apiUrl);
+    expect(results[0]!.endpoint).toBeUndefined();
   });
 
   it('filters by maxPrice', async () => {
@@ -411,6 +460,10 @@ describe('discoverServices — error class hierarchy', () => {
 });
 
 describe('AgentBazaar.discover() — client integration', () => {
+  beforeEach(() => {
+    setRpcListings([]);
+  });
+
   afterEach(() => {
     vi.unstubAllGlobals();
   });

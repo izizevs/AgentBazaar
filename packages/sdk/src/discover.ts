@@ -19,29 +19,38 @@ const DiscoverInputSchema = z.object({
   limit: z.number().int().min(1).max(MAX_LIMIT).optional(),
 });
 
-// Wire format returned by the Discovery API
-interface APIServiceEntry {
-  listing: string;
-  owner: string;
-  capability: string;
-  priceUsdc: string; // serialised bigint
-  pricingModel: number;
-  sla: {
-    maxLatencyMs?: number | null;
-    minUptimePct?: number | null;
-    responseFormat?: string | null;
-    jsonSchemaUri?: string | null;
-    customParams?: Array<{ key: string; value: string }>;
-  };
-  endpoint: string;
-  reputation: number;
-  jobsCompleted: number;
-  isActive: boolean;
-}
+// M1: Zod schema for Discovery API wire format — validates before any consumer code runs.
+const APIServiceEntrySchema = z.object({
+  listing: z.string(),
+  owner: z.string(),
+  capability: z.string().max(256),
+  priceUsdc: z.string().regex(/^\d+$/),
+  pricingModel: z.number().int().min(0).max(3),
+  sla: z.object({
+    maxLatencyMs: z.number().int().nonnegative().nullable().optional(),
+    minUptimePct: z.number().int().min(0).max(10_000).nullable().optional(),
+    responseFormat: z.string().max(16).nullable().optional(),
+    jsonSchemaUri: z.string().max(64).nullable().optional(),
+    customParams: z
+      .array(z.object({ key: z.string().max(16), value: z.string().max(32) }))
+      .max(2)
+      .optional(),
+  }),
+  endpoint: z
+    .string()
+    .url()
+    .max(256)
+    .refine((u) => u.startsWith('https://'), 'Endpoint must use HTTPS'),
+  reputation: z.number().int().min(0).max(100),
+  jobsCompleted: z.number().int().nonnegative(),
+  isActive: z.boolean(),
+});
 
-interface APIResponse {
-  services: APIServiceEntry[];
-}
+const APIResponseSchema = z.object({
+  services: z.array(APIServiceEntrySchema).max(MAX_LIMIT),
+});
+
+type APIServiceEntry = z.infer<typeof APIServiceEntrySchema>;
 
 function toSlaParams(raw: APIServiceEntry['sla']): SlaParams {
   return {
@@ -60,17 +69,18 @@ async function fetchFromAPI(
   input: z.infer<typeof DiscoverInputSchema>,
   limit: number,
 ): Promise<ServiceProvider[]> {
-  const url = new URL('/services', baseUrl);
-  if (input.capability) url.searchParams.set('capability', input.capability);
-  if (input.minReputation !== undefined)
-    url.searchParams.set('minReputation', String(input.minReputation));
-  if (input.maxPrice !== undefined) url.searchParams.set('maxPrice', input.maxPrice.toString());
-  if (input.maxLatency !== undefined) url.searchParams.set('maxLatency', String(input.maxLatency));
-  if (input.sort) url.searchParams.set('sort', input.sort);
-  url.searchParams.set('limit', String(limit));
-
+  // L1: URL construction inside try so a bad baseUrl becomes DiscoveryAPIError
   let res: Response;
   try {
+    const url = new URL('/services', baseUrl);
+    if (input.capability) url.searchParams.set('capability', input.capability);
+    if (input.minReputation !== undefined)
+      url.searchParams.set('minReputation', String(input.minReputation));
+    if (input.maxPrice !== undefined) url.searchParams.set('maxPrice', input.maxPrice.toString());
+    if (input.maxLatency !== undefined)
+      url.searchParams.set('maxLatency', String(input.maxLatency));
+    if (input.sort) url.searchParams.set('sort', input.sort);
+    url.searchParams.set('limit', String(limit));
     res = await fetch(url.toString(), { signal: AbortSignal.timeout(10_000) });
   } catch (err) {
     throw new DiscoveryAPIError(
@@ -82,8 +92,17 @@ async function fetchFromAPI(
     throw new DiscoveryAPIError(`Discovery API error: ${res.status} ${res.statusText}`);
   }
 
-  const body = (await res.json()) as APIResponse;
-  return body.services.map((entry) => ({
+  // M1: Zod-validate response; L2: json() SyntaxError → DiscoveryAPIError → triggers RPC fallback
+  let parsed: z.infer<typeof APIResponseSchema>;
+  try {
+    parsed = APIResponseSchema.parse(await res.json());
+  } catch (err) {
+    throw new DiscoveryAPIError(
+      `Discovery API response invalid: ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
+
+  return parsed.services.map((entry) => ({
     listing: new PublicKey(entry.listing),
     owner: new PublicKey(entry.owner),
     capability: entry.capability,
@@ -151,7 +170,8 @@ async function fetchFromRPC(
   const mapped: ServiceProvider[] = allListings.map(({ publicKey, account }) => ({
     listing: publicKey,
     owner: account.owner as PublicKey,
-    // capability_hash serialised as hex — original string not available on-chain
+    // L4: capability is the hex of the on-chain capability_hash — the original string is not
+    // stored on-chain (M0). API path returns the human-readable string; callers must handle both.
     capability: Buffer.from(account.capabilityHash as number[]).toString('hex'),
     priceUsdc: BigInt((account.priceLamports as { toString(): string }).toString()),
     pricingModel: account.pricingModel as number,
@@ -167,8 +187,8 @@ async function fetchFromRPC(
       customParams: (account.slaParams as { customParams: Array<{ key: string; value: string }> })
         .customParams,
     },
-    // endpoint is stored in IPFS metadata only — not available in RPC fallback
-    endpoint: '',
+    // L5: endpoint is in IPFS metadata only — undefined signals "not available" in RPC fallback
+    endpoint: undefined,
     // reputation_score is not stored on-chain in M0; set to 0 for RPC fallback results
     reputation: 0,
     jobsCompleted: account.jobsCompleted as number,

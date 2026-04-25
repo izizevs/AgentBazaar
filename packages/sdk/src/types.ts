@@ -66,7 +66,8 @@ export interface ServiceProvider {
   priceUsdc: bigint;
   pricingModel: number;
   sla: SlaParams;
-  endpoint: string;
+  /** HTTPS endpoint URL. undefined when sourced from the RPC fallback (endpoint lives in IPFS metadata only). */
+  endpoint: string | undefined;
   reputation: number;
   jobsCompleted: number;
   isActive: boolean;

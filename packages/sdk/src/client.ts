@@ -51,8 +51,9 @@ export class AgentBazaar {
     this.wallet = wallet;
     this.connection = typeof rpc === 'string' ? new Connection(rpc, 'confirmed') : rpc;
     this.#pinataJwt = pinataJwt;
-    this.discoveryApiUrl =
-      discoveryApiUrl ?? process.env.DISCOVERY_API_URL ?? 'http://localhost:8787';
+    // L3: guard process.env access for browser environments without a process polyfill
+    const envUrl = typeof process !== 'undefined' ? process.env?.DISCOVERY_API_URL : undefined;
+    this.discoveryApiUrl = discoveryApiUrl ?? envUrl ?? 'http://localhost:8787';
   }
 
   /**
