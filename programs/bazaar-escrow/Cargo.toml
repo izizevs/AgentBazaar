@@ -20,3 +20,5 @@ idl-build = ["anchor-lang/idl-build"]
 
 [dependencies]
 anchor-lang = { workspace = true }
+anchor-spl = { workspace = true }
+bazaar-registry = { path = "../bazaar-registry", features = ["cpi"] }

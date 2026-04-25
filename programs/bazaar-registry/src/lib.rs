@@ -1,4 +1,5 @@
 use anchor_lang::prelude::*;
+use anchor_lang::solana_program::pubkey;
 
 declare_id!("GJRgCCqkYvAezidpdd3i4p4kRRfJnM1EfGfgqYgchQqd");
 
@@ -11,6 +12,11 @@ pub const MAX_CUSTOM_PARAMS: usize = 2;
 
 pub const PRICING_MODEL_MAX: u8 = 3;
 pub const UPTIME_PCT_MAX_BPS: u16 = 10_000;
+
+// C1 fix: bazaar-escrow program ID stored as a constant so we can verify
+// that increment_jobs_completed is only callable via bazaar-escrow CPI.
+// Must stay in sync with declare_id! in programs/bazaar-escrow/src/lib.rs.
+pub const BAZAAR_ESCROW_ID: Pubkey = pubkey!("qTezZXasYhw2mUQiJC4FSpu1FrDWqawAWdAaWzvdzSs");
 
 #[program]
 pub mod bazaar_registry {
@@ -135,6 +141,33 @@ pub mod bazaar_registry {
         });
         Ok(())
     }
+
+    /// CPI-only: called by bazaar-escrow on confirm_delivery.
+    /// The escrow_authority PDA (seeds=[b"authority"], program=bazaar-escrow)
+    /// must sign — enforced by the Signer + seeds::program constraint below.
+    pub fn increment_jobs_completed(ctx: Context<IncrementJobsCompleted>) -> Result<()> {
+        let listing = &mut ctx.accounts.listing;
+        listing.jobs_completed = listing
+            .jobs_completed
+            .checked_add(1)
+            .ok_or(RegistryError::JobsCompletedOverflow)?;
+        Ok(())
+    }
+}
+
+#[derive(Accounts)]
+pub struct IncrementJobsCompleted<'info> {
+    #[account(mut)]
+    pub listing: Account<'info, ServiceListing>,
+
+    /// C1 fix: PDA derived from [b"authority"] in bazaar-escrow program.
+    /// Only bazaar-escrow can produce a valid signer here via CPI invoke_signed.
+    #[account(
+        seeds = [b"authority"],
+        seeds::program = BAZAAR_ESCROW_ID,
+        bump,
+    )]
+    pub escrow_authority: Signer<'info>,
 }
 
 #[derive(Accounts)]
@@ -295,4 +328,6 @@ pub enum RegistryError {
     AlreadyInactive,
     #[msg("Listing is already active")]
     AlreadyActive,
+    #[msg("jobs_completed counter would overflow u32")]
+    JobsCompletedOverflow,
 }
