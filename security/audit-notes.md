@@ -1842,3 +1842,243 @@ writes is a state-corruption vector.
 3. **Pre-prod:** O3 — rate limiting at Hono or Railway edge.
 
 None of these block PR #32's merge for M0 sandbox testing.
+
+---
+
+## PR #35 — feature/backend-webhook-auth — 2026-04-25 (substantial audit)
+**Verdict:** APPROVED with one Medium and two Lows + three informational
+notes. **L1 from the PR #32 audit is closed in substance** — auth check
+is first, `timingSafeEqual` is used correctly, fail-closed on missing
+secret, replay-dedup table is in place. New findings concern
+**robustness of the implementation**, not gaps in coverage.
+
+**Scope walked:**
+- `apps/indexer/src/webhooks/auth.ts` (new, +20) — Bearer token verify
+- `apps/indexer/src/webhooks/handler.ts` (+43 / -5) — auth + replay
+- `apps/indexer/src/env.ts` (+2 / -1) — `HELIUS_WEBHOOK_SECRET` required
+  + lazy `getEnv()`
+- `apps/indexer/src/db/client.ts` (new, +12) — lazy postgres-js singleton
+- `apps/indexer/src/db/schema.ts` (+7) — `processed_signatures` table
+- `apps/indexer/drizzle/0002_eminent_midnight.sql` (new) — migration
+- `apps/indexer/tests/webhook.test.ts` (+48 / -9) — 3 auth tests
+- `apps/indexer/tests/webhook-replay.test.ts` (new, +97) — 3 DB-gated tests
+- `.env.example` (+4) — `HELIUS_WEBHOOK_SECRET` doc + generation hint
+
+**Backend-eng's six key decisions, each verified:**
+
+1. ✅ **Static Bearer (not HMAC) per Helius's actual design.** Helius
+   echoes the dashboard-configured `authHeader` value verbatim as the
+   `Authorization` header. Verified from Helius docs. The
+   implementation matches Helius's auth model. (See O1 below for the
+   security tradeoff vs. HMAC.)
+
+2. ✅ **Auth check is first.** `verifyHeliusAuth(c)` runs before
+   `c.req.json()`, before `HeliusWebhookPayloadSchema.safeParse`,
+   before any DB query. Correct order — no information leakage about
+   payload structure to unauthenticated callers, no wasted compute on
+   parse before auth.
+
+3. ✅ **`HELIUS_WEBHOOK_SECRET` flipped to required in env Zod schema.**
+   `index.ts` line 6 calls `getEnv()` at startup → Zod parse runs →
+   missing secret = startup crash. Fail-fast preserved in production
+   despite the `getEnv()` lazy pattern, because `index.ts` is the
+   production entrypoint and tests bypass it via `app.ts`.
+   (Subtle: `auth.ts` reads `process.env['HELIUS_WEBHOOK_SECRET']`
+   directly, not via `getEnv()`. That's a deliberate test-isolation
+   choice and is safe because `getEnv()` already validated the value
+   exists at startup.)
+
+4. ⚠️ **Replay dedup via `processed_signatures` table** — table and
+   migration are correct, but the handler's SELECT-then-INSERT pattern
+   is **not atomic**. See **M1** below.
+
+5. ✅ **`src/db/client.ts` lazy postgres-js singleton.** Connection
+   established on first query. Tests that don't touch the DB can
+   import `app.ts` without a connection attempt. Standard pattern.
+
+6. ✅ **Replay check conditional on `DATABASE_URL`** — fails-open for
+   replay only. Auth is hard-enforced regardless. Reasonable for the
+   CI-without-DB test path. Production always sets `DATABASE_URL` (per
+   Railway / docker-compose). Worth tracking that this branch only
+   protects when the DB is configured — flagged in O3 below.
+
+**`auth.ts` walkthrough (security-critical):**
+
+```ts
+export function verifyHeliusAuth(c: Context): boolean {
+  const secret = process.env['HELIUS_WEBHOOK_SECRET'];
+  if (!secret) return false;
+  const received = c.req.header('Authorization') ?? '';
+  if (!received) return false;
+  const a = Buffer.from(secret);
+  const b = Buffer.from(received);
+  if (a.length !== b.length) return false;
+  return timingSafeEqual(a, b);
+}
+```
+
+✅ All five security properties correct:
+- Read secret at request time (not cached) — ensures secret rotation via env-var flip works without restart, though full rotation typically requires restart anyway.
+- `if (!secret) return false` — fail closed on missing config.
+- `if (!received) return false` — fail closed on missing header.
+- Equal-length precondition before `timingSafeEqual` — required (it throws on length mismatch). Length check itself is a minor timing oracle, but Bearer tokens have a fixed length pattern so the leak is negligible.
+- `timingSafeEqual(Buffer, Buffer)` — constant-time comparison. ✅
+
+**Findings:**
+
+- **Critical / High:** none.
+
+- **Medium:**
+
+  - **M1. TOCTOU race + N+1 query pattern in replay dedup.**
+    Two issues with the same fix:
+
+    ```ts
+    // (a) Pre-check loop — N+1 SELECT
+    for (const event of events) {
+      const rows = await sql`
+        SELECT signature FROM processed_signatures WHERE signature = ${event.signature}
+      `;
+      if (rows.length > 0) seenSet.add(event.signature);
+    }
+    // ... business logic (currently just logging) ...
+    // (b) Record loop — N+1 INSERT
+    for (const event of newEvents) {
+      await sql`
+        INSERT INTO processed_signatures (signature) VALUES (${event.signature})
+        ON CONFLICT (signature) DO NOTHING
+      `;
+    }
+    ```
+
+    1. **Race window:** between (a) and (b), two concurrent deliveries
+       of the same signature can both see SELECT return empty, both
+       advance to business logic, both attempt INSERT. ON CONFLICT
+       keeps the DB clean (only one INSERT succeeds), but BOTH have
+       already executed the business logic. Currently harmless
+       (logging only); when **Task #13** wires upserts to
+       `service_listings`, duplicate upserts become real DB writes —
+       only safe if those upserts are themselves idempotent (likely,
+       given `pubkey` is the PK, but Task #13 needs to verify
+       explicitly).
+    2. **Performance:** one SELECT and one INSERT per event in a
+       batch. A 100-event Helius batch = 200 sequential round-trips.
+       At RTT 5ms that's a full second of latency before processing
+       starts.
+
+    **Combined fix — single atomic INSERT ... RETURNING:**
+    ```ts
+    const sigs = events.map(e => e.signature);
+    const inserted = await sql<{ signature: string }[]>`
+      INSERT INTO processed_signatures (signature)
+      SELECT * FROM unnest(${sigs}::text[])
+      ON CONFLICT (signature) DO NOTHING
+      RETURNING signature
+    `;
+    const newSigSet = new Set(inserted.map(r => r.signature));
+    const newEvents = events.filter(e => newSigSet.has(e.signature));
+    ```
+
+    Properties:
+    - **Atomic** — INSERT runs as a single statement; concurrent
+      deliveries serialize on the row lock, only one inserts.
+    - **Race-free** — RETURNING gives back the rows that were
+      newly inserted (not the ones that lost the conflict).
+      `newEvents` is exactly the deduplicated set.
+    - **One round-trip** instead of 2N.
+    - **Same idempotency contract** — replays still skipped.
+
+    Worth landing **before Task #13** for the same reason L1 had to
+    land before Task #15-now-#13 — the moment business logic runs on
+    the deduplicated stream, races become real corruption.
+
+- **Low:**
+
+  - **L1. `HELIUS_WEBHOOK_SECRET: z.string().min(1)` is too loose.**
+    Zod accepts a 1-char secret that is brute-forceable in seconds.
+    The `.env.example` recommends `openssl rand -base64 48` which
+    produces ~64 chars, so the documented practice already exceeds
+    the schema's lower bound — but a misconfigured deploy with a
+    short secret would still pass the startup check and run with
+    weak auth.
+
+    **Fix:** `HELIUS_WEBHOOK_SECRET: z.string().min(32)` (or higher).
+    Pairs naturally with the `.env.example` generation hint.
+    Trivial; tighten before mainnet.
+
+  - **L2. `processed_signatures` has no retention policy.**
+    Table grows forever; no TTL. Solana finality is ~13 seconds;
+    Helius's replay window is bounded (typically retries for a few
+    hours at most). Once Task #13 lands, a daily cron / pg_cron job
+    like:
+    ```sql
+    DELETE FROM processed_signatures WHERE processed_at < NOW() - INTERVAL '7 days';
+    ```
+    keeps the table bounded. Operational concern; not security.
+
+**Three informational notes (not findings):**
+
+- **O1. Static Bearer ≠ HMAC.** This is Helius's design, not
+  backend-eng's choice. Implication: anyone with the secret can
+  POST any body — the secret authenticates the *caller*, not the
+  *request body*. An HMAC scheme (Stripe / GitHub style) would
+  bind the secret to the body. Mitigations on the static-Bearer
+  side:
+  1. Treat the secret like a database password — env-var only,
+     never logged, rotate periodically.
+  2. Optional source-IP allowlist (Helius publishes outgoing IP
+     ranges) at Railway's edge or via a Hono middleware. Not
+     gating, defense-in-depth.
+  3. The replay-dedup table partially compensates — an attacker
+     replaying a captured request with the same signatures gets
+     deduplicated. But an attacker who *crafts new signatures*
+     can still inject. Replay protects against accidental
+     duplication, not adversarial replay-with-mutation.
+
+- **O2. No SSL preference on postgres-js.** `postgres(url)` uses
+  the URL's `?sslmode=` if present; defaults to `prefer` which
+  accepts unencrypted connections. For production deploys against
+  Railway / managed Postgres, set `postgres(url, { ssl: 'require' })`.
+  Confirmed not needed for M0 dev-loop (local Postgres in
+  docker-compose); flag for the production-deploy checklist.
+
+- **O3. Replay check conditional on `DATABASE_URL`** — backend-eng
+  documented this as deliberate ("fails-open for replay only").
+  Reasonable for CI but worth noting that **a production deploy
+  with `DATABASE_URL` accidentally unset** would silently run
+  without replay protection (though it would also fail at the
+  upsert step in Task #13, so the practical impact is limited).
+  M1 cross-references: index.ts's startup-time `getEnv()` call
+  validates `DATABASE_URL: z.string().url()` is set, so this
+  scenario can't occur in production unless the operator
+  intentionally clears the env var post-startup.
+
+**Cross-cutting carryover (informational):**
+- Task #13's upsert path will need O1's idempotency property
+  ("upserts are themselves idempotent"). The schema's `pubkey
+  PRIMARY KEY` provides this.
+- The pubkey-shape note from PR #32 (`feePayer`/`programId`/
+  `accounts` are `z.string()` without base58 refinement) becomes
+  relevant when Task #13 reads them into upserts hitting `bytea`
+  columns — that's where O8-style refinement would matter.
+
+**Mainnet release-gate verdict:** **L1 from PR #32 closed in
+substance.** Production-ready posture for the auth surface itself.
+M1 (race + N+1) should land **before Task #13** wires upserts —
+same gate-before-business-logic principle that drove L1 → PR #35.
+L1 (.min(32) on the schema) and L2 (retention policy) are tighten-
+the-implementation items; both pre-mainnet, neither blocking.
+
+**Recommended fix order:**
+1. **Before Task #13:** M1 — atomic INSERT ... RETURNING for
+   replay dedup.
+2. **Soon (or pair with M1):** L1 — `.min(32)` on
+   `HELIUS_WEBHOOK_SECRET`.
+3. **Pre-mainnet:** L2 retention; O2 SSL; O1 source-IP allowlist
+   (defense-in-depth).
+
+None block PR #35's merge — auth is correct, replay table is
+correct, the issues are around implementation tightness rather
+than gaps. Solid work; the discipline patterns from earlier audits
+(fail-fast, Zod-first, structured logging, no-secrets-in-logs) all
+carry through cleanly.
