@@ -1,5 +1,6 @@
 import { getSql } from '../db/client.js';
 import { logger } from '../logger.js';
+import { safeLogUrl } from '../util/safe-log-url.js';
 import type { ServiceListingUpdatedData } from './decoder.js';
 import { fetchMetadata } from './fetch-metadata.js';
 
@@ -65,7 +66,13 @@ export async function onListingUpdated(
   }
 
   logger.info(
-    { txSignature, pubkey, newPrice: newPrice?.toString() ?? null, newUri, isActive },
+    {
+      txSignature,
+      pubkey,
+      newPrice: newPrice?.toString() ?? null,
+      newUri: newUri ? safeLogUrl(newUri) : null,
+      isActive,
+    },
     'ServiceListingUpdated — applied',
   );
 }
