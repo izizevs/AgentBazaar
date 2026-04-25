@@ -120,7 +120,7 @@ describe('bazaar-registry', () => {
       expect(acct.owner.toBase58()).to.equal(seller.publicKey.toBase58());
       expect(acct.satiAgentId.toNumber()).to.equal(42);
       expect(Buffer.from(acct.capabilityHash).equals(capabilityHash)).to.equal(true);
-      expect(acct.priceLamports.toNumber()).to.equal(1_000_000);
+      expect(acct.priceUsdcBaseUnits.toNumber()).to.equal(1_000_000);
       expect(acct.pricingModel).to.equal(1);
       expect(acct.metadataUri).to.equal(metadataUri);
       expect(acct.isActive).to.equal(true);
@@ -282,7 +282,7 @@ describe('bazaar-registry', () => {
         .rpc();
 
       const acct = await program.account.serviceListing.fetch(listing);
-      expect(acct.priceLamports.toNumber()).to.equal(9_999);
+      expect(acct.priceUsdcBaseUnits.toNumber()).to.equal(9_999);
       expect(acct.metadataUri).to.equal('ipfs://new');
       expect(acct.slaParams.maxLatencyMs).to.equal(300);
       expect(acct.slaParams.customParams).to.have.length(1);
@@ -301,7 +301,7 @@ describe('bazaar-registry', () => {
         .rpc();
 
       const acct = await program.account.serviceListing.fetch(listing);
-      expect(acct.priceLamports.toNumber()).to.equal(1234);
+      expect(acct.priceUsdcBaseUnits.toNumber()).to.equal(1234);
       expect(acct.metadataUri).to.equal('ipfs://initial');
       expect(acct.slaParams.maxLatencyMs).to.equal(null);
     });

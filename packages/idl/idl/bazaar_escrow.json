@@ -92,8 +92,45 @@
           "writable": true
         },
         {
+          "name": "usdc_mint",
+          "address": "8VEVN5sJUzqN3ddkJV9gYMbLBnmAxUXsC5CDDU9WFwzE"
+        },
+        {
           "name": "token_program",
           "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        },
+        {
+          "name": "event_authority",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  95,
+                  95,
+                  101,
+                  118,
+                  101,
+                  110,
+                  116,
+                  95,
+                  97,
+                  117,
+                  116,
+                  104,
+                  111,
+                  114,
+                  105,
+                  116,
+                  121
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "program",
+          "address": "EhFptDs4mz6rt7HDmt8pB7ZogiqxUMVhpjB3NvToXxW2"
         }
       ],
       "args": []
@@ -187,6 +224,10 @@
           "writable": true
         },
         {
+          "name": "usdc_mint",
+          "address": "8VEVN5sJUzqN3ddkJV9gYMbLBnmAxUXsC5CDDU9WFwzE"
+        },
+        {
           "name": "listing",
           "writable": true
         },
@@ -223,6 +264,39 @@
         {
           "name": "token_program",
           "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        },
+        {
+          "name": "event_authority",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  95,
+                  95,
+                  101,
+                  118,
+                  101,
+                  110,
+                  116,
+                  95,
+                  97,
+                  117,
+                  116,
+                  104,
+                  111,
+                  114,
+                  105,
+                  116,
+                  121
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "program",
+          "address": "EhFptDs4mz6rt7HDmt8pB7ZogiqxUMVhpjB3NvToXxW2"
         }
       ],
       "args": [
@@ -321,10 +395,7 @@
         },
         {
           "name": "usdc_mint",
-          "docs": [
-            "and buyer_token_account. H1 per-cluster address check is M1-tail work",
-            "(see docs/decisions/0002-m1-dispute-stub.md for why devnet omits it)."
-          ]
+          "address": "8VEVN5sJUzqN3ddkJV9gYMbLBnmAxUXsC5CDDU9WFwzE"
         },
         {
           "name": "token_program",
@@ -337,6 +408,39 @@
         {
           "name": "rent",
           "address": "SysvarRent111111111111111111111111111111111"
+        },
+        {
+          "name": "event_authority",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  95,
+                  95,
+                  101,
+                  118,
+                  101,
+                  110,
+                  116,
+                  95,
+                  97,
+                  117,
+                  116,
+                  104,
+                  111,
+                  114,
+                  105,
+                  116,
+                  121
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "program",
+          "address": "EhFptDs4mz6rt7HDmt8pB7ZogiqxUMVhpjB3NvToXxW2"
         }
       ],
       "args": [
@@ -451,8 +555,45 @@
           "writable": true
         },
         {
+          "name": "usdc_mint",
+          "address": "8VEVN5sJUzqN3ddkJV9gYMbLBnmAxUXsC5CDDU9WFwzE"
+        },
+        {
           "name": "token_program",
           "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        },
+        {
+          "name": "event_authority",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  95,
+                  95,
+                  101,
+                  118,
+                  101,
+                  110,
+                  116,
+                  95,
+                  97,
+                  117,
+                  116,
+                  104,
+                  111,
+                  114,
+                  105,
+                  116,
+                  121
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "program",
+          "address": "EhFptDs4mz6rt7HDmt8pB7ZogiqxUMVhpjB3NvToXxW2"
         }
       ],
       "args": [
@@ -550,8 +691,45 @@
           "writable": true
         },
         {
+          "name": "usdc_mint",
+          "address": "8VEVN5sJUzqN3ddkJV9gYMbLBnmAxUXsC5CDDU9WFwzE"
+        },
+        {
           "name": "token_program",
           "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        },
+        {
+          "name": "event_authority",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  95,
+                  95,
+                  101,
+                  118,
+                  101,
+                  110,
+                  116,
+                  95,
+                  97,
+                  117,
+                  116,
+                  104,
+                  111,
+                  114,
+                  105,
+                  116,
+                  121
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "program",
+          "address": "EhFptDs4mz6rt7HDmt8pB7ZogiqxUMVhpjB3NvToXxW2"
         }
       ],
       "args": [
@@ -1060,7 +1238,7 @@
             }
           },
           {
-            "name": "price_lamports",
+            "name": "price_usdc_base_units",
             "type": "u64"
           },
           {

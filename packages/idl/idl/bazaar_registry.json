@@ -57,6 +57,39 @@
               }
             ]
           }
+        },
+        {
+          "name": "event_authority",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  95,
+                  95,
+                  101,
+                  118,
+                  101,
+                  110,
+                  116,
+                  95,
+                  97,
+                  117,
+                  116,
+                  104,
+                  111,
+                  114,
+                  105,
+                  116,
+                  121
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "program",
+          "address": "ADWoSmfUWLLRGMWZ61xuAMPhDgG77ziqAC5MA9voqLn3"
         }
       ],
       "args": []
@@ -198,6 +231,39 @@
               }
             ]
           }
+        },
+        {
+          "name": "event_authority",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  95,
+                  95,
+                  101,
+                  118,
+                  101,
+                  110,
+                  116,
+                  95,
+                  97,
+                  117,
+                  116,
+                  104,
+                  111,
+                  114,
+                  105,
+                  116,
+                  121
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "program",
+          "address": "ADWoSmfUWLLRGMWZ61xuAMPhDgG77ziqAC5MA9voqLn3"
         }
       ],
       "args": []
@@ -251,6 +317,39 @@
         {
           "name": "system_program",
           "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "event_authority",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  95,
+                  95,
+                  101,
+                  118,
+                  101,
+                  110,
+                  116,
+                  95,
+                  97,
+                  117,
+                  116,
+                  104,
+                  111,
+                  114,
+                  105,
+                  116,
+                  121
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "program",
+          "address": "ADWoSmfUWLLRGMWZ61xuAMPhDgG77ziqAC5MA9voqLn3"
         }
       ],
       "args": [
@@ -268,7 +367,7 @@
           "type": "u64"
         },
         {
-          "name": "price_lamports",
+          "name": "price_usdc_base_units",
           "type": "u64"
         },
         {
@@ -338,6 +437,39 @@
               }
             ]
           }
+        },
+        {
+          "name": "event_authority",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  95,
+                  95,
+                  101,
+                  118,
+                  101,
+                  110,
+                  116,
+                  95,
+                  97,
+                  117,
+                  116,
+                  104,
+                  111,
+                  114,
+                  105,
+                  116,
+                  121
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "program",
+          "address": "ADWoSmfUWLLRGMWZ61xuAMPhDgG77ziqAC5MA9voqLn3"
         }
       ],
       "args": [
@@ -501,7 +633,7 @@
             }
           },
           {
-            "name": "price_lamports",
+            "name": "price_usdc_base_units",
             "type": "u64"
           },
           {
@@ -566,7 +698,7 @@
             }
           },
           {
-            "name": "price_lamports",
+            "name": "price_usdc_base_units",
             "type": "u64"
           },
           {

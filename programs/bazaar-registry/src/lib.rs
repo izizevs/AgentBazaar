@@ -27,7 +27,7 @@ pub mod bazaar_registry {
         ctx: Context<RegisterService>,
         capability_hash: [u8; 32],
         sati_agent_id: u64,
-        price_lamports: u64,
+        price_usdc_base_units: u64,
         pricing_model: u8,
         sla_params: SlaParams,
         metadata_uri: String,
@@ -52,7 +52,7 @@ pub mod bazaar_registry {
         listing.owner = ctx.accounts.owner.key();
         listing.sati_agent_id = sati_agent_id;
         listing.capability_hash = capability_hash;
-        listing.price_lamports = price_lamports;
+        listing.price_usdc_base_units = price_usdc_base_units;
         listing.pricing_model = pricing_model;
         listing.sla_params = sla_params;
         listing.metadata_uri = metadata_uri.clone();
@@ -66,7 +66,7 @@ pub mod bazaar_registry {
             owner: listing.owner,
             sati_agent_id,
             capability_hash,
-            price_lamports,
+            price_usdc_base_units,
             pricing_model,
             metadata_uri,
             created_at: listing.created_at,
@@ -84,7 +84,7 @@ pub mod bazaar_registry {
         let listing = &mut ctx.accounts.listing;
 
         if let Some(price) = new_price {
-            listing.price_lamports = price;
+            listing.price_usdc_base_units = price;
         }
         if let Some(sla) = new_sla {
             sla.validate()?;
@@ -236,7 +236,7 @@ pub struct ServiceListing {
     pub owner: Pubkey,
     pub sati_agent_id: u64,
     pub capability_hash: [u8; 32],
-    pub price_lamports: u64,
+    pub price_usdc_base_units: u64,
     pub pricing_model: u8,
     pub sla_params: SlaParams,
     #[max_len(MAX_METADATA_URI)]
@@ -308,7 +308,7 @@ pub struct ServiceListingCreated {
     pub owner: Pubkey,
     pub sati_agent_id: u64,
     pub capability_hash: [u8; 32],
-    pub price_lamports: u64,
+    pub price_usdc_base_units: u64,
     pub pricing_model: u8,
     pub metadata_uri: String,
     pub created_at: i64,

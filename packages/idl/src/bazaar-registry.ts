@@ -274,7 +274,7 @@ export type BazaarRegistry = {
           "type": "u64"
         },
         {
-          "name": "priceLamports",
+          "name": "priceUsdcBaseUnits",
           "type": "u64"
         },
         {
@@ -507,7 +507,7 @@ export type BazaarRegistry = {
             }
           },
           {
-            "name": "priceLamports",
+            "name": "priceUsdcBaseUnits",
             "type": "u64"
           },
           {
@@ -572,7 +572,7 @@ export type BazaarRegistry = {
             }
           },
           {
-            "name": "priceLamports",
+            "name": "priceUsdcBaseUnits",
             "type": "u64"
           },
           {

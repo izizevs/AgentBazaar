@@ -17,7 +17,7 @@ export type ServiceListingCreatedData = {
   owner: { toString(): string };
   satiAgentId: { toString(): string };
   capabilityHash: number[];
-  priceLamports: { toString(): string };
+  priceUsdcBaseUnits: { toString(): string };
   pricingModel: number;
   metadataUri: string;
   createdAt: { toString(): string };

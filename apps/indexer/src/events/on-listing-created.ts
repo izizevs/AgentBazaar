@@ -23,7 +23,7 @@ export async function onListingCreated(
   const owner = data.owner.toString();
   const capabilityHash = Buffer.from(data.capabilityHash);
   const satiAgentId = BigInt(data.satiAgentId.toString());
-  const priceLamports = BigInt(data.priceLamports.toString());
+  const priceUsdcBaseUnits = BigInt(data.priceUsdcBaseUnits.toString());
   const pricingModel = data.pricingModel;
   const metadataUri = data.metadataUri;
   const createdAt = new Date(Number(data.createdAt.toString()) * 1000);
@@ -32,7 +32,7 @@ export async function onListingCreated(
   // postgres.js doesn't accept bigint in template literals — pass as strings;
   // Postgres parses them for the int8 (bigint) columns.
   const satiAgentIdStr = satiAgentId.toString();
-  const priceLamportsStr = priceLamports.toString();
+  const priceUsdcBaseUnitsStr = priceUsdcBaseUnits.toString();
 
   // Upsert — ON CONFLICT DO NOTHING so a re-delivered event doesn't clobber
   // a listing that was subsequently updated.
@@ -42,7 +42,7 @@ export async function onListingCreated(
       pricing_model, sla_params, metadata_uri, is_active, jobs_completed,
       created_at, updated_at
     ) VALUES (
-      ${pubkey}, ${owner}, ${capabilityHash}, ${satiAgentIdStr}, ${priceLamportsStr},
+      ${pubkey}, ${owner}, ${capabilityHash}, ${satiAgentIdStr}, ${priceUsdcBaseUnitsStr},
       ${pricingModel}, ${JSON.stringify(DEFAULT_SLA)}, ${metadataUri},
       true, 0, ${createdAt}, ${createdAt}
     )

@@ -105,7 +105,7 @@ describe.skipIf(!isE2E)('E2E: register → discover', { timeout: 120_000 }, () =
     await assertListingExists(connection, listingPda, {
       isActive: true,
       owner: walletKeypair.publicKey,
-      priceLamports: 1_000_000n,
+      priceUsdcBaseUnits: 1_000_000n,
     });
   });
 

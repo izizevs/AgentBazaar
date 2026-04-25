@@ -131,7 +131,7 @@ function makeRpcListing(overrides: Partial<ServiceProvider> = {}): RpcListing {
     account: {
       owner: p.owner,
       capabilityHash: Array.from(Buffer.from(p.capability, 'utf8')),
-      priceLamports: { toString: () => p.priceUsdc.toString() },
+      priceUsdcBaseUnits: { toString: () => p.priceUsdc.toString() },
       pricingModel: p.pricingModel,
       slaParams: {
         maxLatencyMs: p.sla.maxLatencyMs ?? null,

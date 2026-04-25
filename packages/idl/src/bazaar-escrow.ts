@@ -1066,7 +1066,7 @@ export type BazaarEscrow = {
             }
           },
           {
-            "name": "priceLamports",
+            "name": "priceUsdcBaseUnits",
             "type": "u64"
           },
           {

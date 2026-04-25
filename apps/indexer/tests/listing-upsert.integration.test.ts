@@ -32,7 +32,7 @@ function createdData(
     owner: { toString: () => OWNER },
     satiAgentId: { toString: () => '42' },
     capabilityHash: CAP_HASH,
-    priceLamports: { toString: () => '1000000' },
+    priceUsdcBaseUnits: { toString: () => '1000000' },
     pricingModel: 0,
     metadataUri: METADATA_URI,
     createdAt: { toString: () => String(Math.floor(Date.now() / 1000)) },
@@ -98,7 +98,7 @@ describe.skipIf(process.env.INTEGRATION !== 'true')(
       // Same pubkey, different price — ON CONFLICT DO NOTHING should keep original.
       await onListingCreated(
         `${RUN}-create-dupe`,
-        createdData({ priceLamports: { toString: () => '9999999' } }),
+        createdData({ priceUsdcBaseUnits: { toString: () => '9999999' } }),
       );
 
       const rows = await sql`

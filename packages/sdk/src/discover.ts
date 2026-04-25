@@ -188,7 +188,7 @@ async function fetchFromRPC(
     // L4: capability is the hex of the on-chain capability_hash — the original string is not
     // stored on-chain (M0). API path returns the human-readable string; callers must handle both.
     capability: Buffer.from(account.capabilityHash as number[]).toString('hex'),
-    priceUsdc: BigInt((account.priceLamports as { toString(): string }).toString()),
+    priceUsdc: BigInt((account.priceUsdcBaseUnits as { toString(): string }).toString()),
     pricingModel: account.pricingModel as number,
     sla: {
       maxLatencyMs:

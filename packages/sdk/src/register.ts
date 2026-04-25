@@ -142,7 +142,7 @@ export async function registerService(
 
   // 8. Prepare instruction arguments
   const satiAgentId = new BN(satiId.toString());
-  const priceLamports = new BN(input.priceUsdc.toString());
+  const priceUsdcBaseUnits = new BN(input.priceUsdc.toString());
   const pricingModelByte = PRICING_MODEL_BYTE[input.pricingModel];
   const slaParams = toAnchorSla(input.sla);
 
@@ -151,7 +151,7 @@ export async function registerService(
     .registerService(
       capHashArray,
       satiAgentId,
-      priceLamports,
+      priceUsdcBaseUnits,
       pricingModelByte,
       slaParams,
       metadataUri,

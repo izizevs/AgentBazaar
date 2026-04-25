@@ -3,8 +3,8 @@ import { expect } from 'vitest';
 import { buildRegistryProgram } from './tx-utils.js';
 
 export interface ExpectedListing {
-  /** On-chain price in lamports (mapped from priceUsdc in register() input). */
-  priceLamports?: bigint;
+  /** On-chain price in USDC base units (mapped from priceUsdc in register() input). */
+  priceUsdcBaseUnits?: bigint;
   isActive?: boolean;
   owner?: PublicKey;
 }
@@ -29,9 +29,9 @@ export async function assertListingExists(
   if (expected.owner !== undefined) {
     expect(listing.owner.toBase58()).toBe(expected.owner.toBase58());
   }
-  if (expected.priceLamports !== undefined) {
-    const onChainPrice = BigInt(listing.priceLamports.toString());
-    expect(onChainPrice).toBe(expected.priceLamports);
+  if (expected.priceUsdcBaseUnits !== undefined) {
+    const onChainPrice = BigInt(listing.priceUsdcBaseUnits.toString());
+    expect(onChainPrice).toBe(expected.priceUsdcBaseUnits);
   }
 }
 
