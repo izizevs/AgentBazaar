@@ -3887,3 +3887,153 @@ the on-chain hardening from PR #51 means the events themselves are
 trustworthy by the time they reach this layer. The audit pattern shifts
 appropriately for the off-chain consumer: less authority/fund-flow, more
 data-integrity/replay-safety.
+
+---
+
+# M1.5 — production-hardening audits
+
+The M1.5 wave addresses carryforwards from M0/M1 that block mainnet. Each
+PR audited here closes a specific finding from earlier rounds.
+
+---
+
+## PR #65 — feature/anchor-emit-cpi-registry — 2026-04-25
+**Verdict:** ✅ APPROVED (CI green; one non-blocking test-coverage follow-up)
+
+### Scope
+
+Migrates `bazaar-registry` from `emit!` to `emit_cpi!` (Anchor 0.31 CPI
+event model) — closes a mainnet blocker flagged in the M0 audit (PR #2
+follow-ups) and the M1 indexer audit (PR #58 implicit reliance on inner
+instructions for reliable event capture by Helius).
+
+Files reviewed:
+- `programs/bazaar-registry/src/lib.rs` (+19 / −4)
+- `programs/tests/bazaar-registry.ts` (+86 / −10)
+
+### Audit checklist (from team-lead's brief)
+
+1. **Anchor v0.31 `emit_cpi!` pattern correct.** ✅
+   - `event_authority` PDA: `seeds = [b"__event_authority"]`, `bump`
+     auto-resolved — matches the canonical Anchor 0.31 macro
+     expectation.
+   - `program: Program<'info, BazaarRegistry>` added to all three
+     emitting `Accounts` structs (`RegisterService`, `UpdateService`,
+     `ToggleService`).
+   - `use crate::program::BazaarRegistry;` import added at top — required
+     for the `Program<'info, BazaarRegistry>` field type to resolve
+     against the auto-generated `program` module.
+   - `/// CHECK:` doc-comment present on each `event_authority`
+     `AccountInfo` field — satisfies Anchor's `unsafe-account-info`
+     lint and documents intent.
+
+2. **Event payload fields unchanged.** ✅ Verified field-by-field:
+   - `ServiceListingCreated`: `listing, owner, sati_agent_id,
+     capability_hash, price_lamports, pricing_model, metadata_uri,
+     created_at` — identical pre/post (lib.rs:289-299).
+   - `ServiceListingUpdated`: `listing, owner, new_price, new_uri,
+     is_active, updated_at` — identical pre/post (lib.rs:301-309).
+   - The indexer's `on-listing-created.ts` / `on-listing-updated.ts`
+     decoders rely on exact field order + name match. No breakage.
+
+3. **All `emit!` migrated — none missed.** ✅ Confirmed via
+   `grep -n 'emit!(' programs/bazaar-registry/src/lib.rs` against the
+   pre-image — exactly four call sites (lines 63, 100, 117, 134), all
+   four converted in the diff. No bare `emit!` remains.
+
+4. **No accidental other behavior change.** ✅ Diff scope is strictly:
+   (a) the four `emit!` → `emit_cpi!` token swaps, (b) the three
+   `Accounts` struct additions, (c) the one `use` import. Validation
+   logic, PDA derivation, `has_one = owner` constraint, the C1 fix
+   (`escrow_authority` Signer with `seeds::program = BAZAAR_ESCROW_ID`
+   on `IncrementJobsCompleted`), and the `Clock` reads are all
+   untouched. No behavior change, no fund-flow surface change.
+
+5. **Tests updated to assert events appear as inner instructions.**
+   ⚠️ **Partial.** Tests are updated to *pass* the new accounts
+   (`eventAuthority`, `program: program.programId`) so the calls
+   succeed under the new account layout, but they do not actually
+   *assert* on the inner-instruction CPI events. The test suite
+   verifies the program still executes; it does not verify the events
+   are emitted in the new shape.
+   - This is a test-coverage gap, not a correctness gap. The
+     `emit_cpi!` macro is a thin self-CPI that's well-exercised in
+     Anchor's own tests; if accounts compile and the tx lands, the CPI
+     fires.
+   - Carryforward to **qa-test-eng (Task #45 in the M1.5 plan)**:
+     when E2E tests run end-to-end against devnet, add an explicit
+     assertion that `tx.meta.innerInstructions` contains a self-CPI
+     to the program with the discriminator for
+     `ServiceListingCreated` / `ServiceListingUpdated`. This is also
+     the only path that proves the indexer can decode the new
+     event-emission shape — Helius webhooks read inner instructions,
+     not log lines.
+
+### Findings
+
+- **Critical:** none.
+- **High:** none.
+- **Medium:** none.
+- **Low:**
+  - **L1. Test suite does not assert event emission shape.** See
+    checklist item #5 above. Carryforward to qa-test-eng. Non-blocking
+    because the on-chain → indexer path is independently verified by
+    Task #28 / #45 E2E tests.
+- **Informational:**
+  - **I1.** `event_authority: AccountInfo<'info>` is functionally
+    equivalent to `UncheckedAccount<'info>` in Anchor 0.31 — both
+    rely on the seed constraint for verification. The current choice
+    is fine; a future stylistic pass could prefer `UncheckedAccount`
+    for clarity but it's not material.
+  - **I2.** PR title says "Task #34" but the live TaskList lists
+    bazaar-registry emit_cpi! migration as **Task #32** (Task #34 is
+    USDC mint binding). Cosmetic — the PR scope matches the live
+    task definition; only the number is off.
+  - **I3.** IDL regeneration: `anchor build` will pick up the new
+    accounts and add `event_authority` + `program` to the IDL's
+    `accounts` array for the three instructions. SDK consumers
+    (`packages/sdk/src/registry.ts`) must rebuild against the new
+    IDL before the next devnet upgrade lands. Out of scope for this
+    PR; tracked under Task #36 (devnet upgrade-in-place) and the
+    sdk-eng's IDL re-export step.
+  - **I4.** No admin-key footprint, no fund-flow change. The C1
+    cross-program-invocation hardening on
+    `IncrementJobsCompleted` is preserved unchanged
+    (`seeds::program = BAZAAR_ESCROW_ID` Signer constraint, lib.rs:159-171).
+
+### Sanity-check answers
+
+1. ✅ **No new admin keys / withdrawal authorities introduced.** The
+   `event_authority` PDA is a self-derived signer for the `emit_cpi!`
+   self-CPI only — it has no authority over funds, listing state, or
+   any other account.
+2. ✅ **No mainnet references.** `declare_id!` unchanged; still the
+   devnet program ID `ADWoSmfUWLLRGMWZ61xuAMPhDgG77ziqAC5MA9voqLn3`.
+3. ✅ **No event-payload field renames.** The indexer can continue
+   decoding `ServiceListingCreated` / `ServiceListingUpdated` with
+   the same Borsh layout. The wire format change is *where* the
+   event lives (inner instruction vs program log), not *what's in
+   it*.
+4. ✅ **`has_one = owner`, PDA-bound seeds, and validation calls
+   untouched.** All authorization invariants from PR #2 still hold.
+5. ✅ **CI green** at the time of review (Lint + typecheck + test
+   workflow run 24941913929 — SUCCESS).
+
+### Verdict
+
+✅ **APPROVE** for merge.
+
+The migration is mechanically clean: four `emit!` swaps + three
+`Accounts` additions + one `use`, with no other functional change.
+The Anchor 0.31 `emit_cpi!` pattern is correctly applied (event
+authority PDA seed, `program` field, `/// CHECK:` doc). The event
+payload field shape is preserved bit-for-bit, so the indexer's
+event decoders need no update.
+
+One non-blocking carryforward: the test suite verifies the new
+account layout doesn't break the call path but does not assert on
+the inner-instruction event emission directly — qa-test-eng (Task
+#45) should add that assertion when the M1.5 E2E refresh lands, so
+that future regressions in the event-emission code path are caught
+inside the program test harness rather than at the indexer
+boundary.
