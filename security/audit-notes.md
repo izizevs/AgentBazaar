@@ -1479,3 +1479,95 @@ Cleared to merge. Particularly clean test discipline — the 11-class
 `it.each` matrix for inheritance is forward-compatible: any new error
 class auto-inherits the `instanceof AgentBazaarError` + `name`
 invariants by being added to the `allClasses` array.
+
+---
+
+## PR #29 — feature/backend-indexer-audit-fixes — 2026-04-25 (re-review)
+
+**Verdict:** APPROVED. All three findings (M1, M2, L1+O1) from PR #22's
+light audit are closed exactly as recommended. No new findings.
+Fix-only PR; cleared to merge.
+
+(GH state note: PR #29 is currently CLOSED — likely a routing
+decision after the original combined PR #28 was split into schema-only
+PR #24 and audit-fixes PR #29. The branch
+`feature/backend-indexer-audit-fixes` remains MERGEABLE; team-lead can
+reopen or replace at will.)
+
+**Scope walked:**
+- `apps/indexer/src/env.ts` (new, +17) — `dotenv-mono/load` + Zod schema
+- `apps/indexer/src/app.ts` (new, +7) — Hono routes only
+- `apps/indexer/src/index.ts` (+4 / -15) — bootstrap-only
+- `apps/indexer/src/logger.ts` (+2 / -1) — uses `env.NODE_ENV`
+- `apps/indexer/drizzle.config.ts` (+2 / -1) — uses `env.DATABASE_URL`
+- `apps/indexer/tests/sanity.test.ts` (+1 / -1) — imports from `app.ts`
+
+**Fix verification:**
+
+- **M1 — dotenv-mono ESM ordering → FIXED.** `src/env.ts` opens with
+  `import 'dotenv-mono/load';` as a side-effect import that runs
+  `dotenvLoad()` at module-eval time. ESM evaluates a module's imports
+  in source order BEFORE running its body, so `dotenv-mono/load`
+  populates `process.env` before `EnvSchema.parse(process.env)` runs
+  at `env.ts` body time.
+
+  **Dependency-graph guarantee:** `env.ts` is a leaf node depending
+  only on `dotenv-mono` and `zod`. Any module that imports `env.ts`
+  (now `logger.ts`, `index.ts`, `drizzle.config.ts`) gets `env.ts`
+  fully loaded before its own body runs. Three layers of cause-and-effect,
+  all enforced by ESM module-load ordering. The header comment in
+  `env.ts` explicitly documents this invariant ("Must be the first
+  import in the dependency graph so downstream modules read the
+  populated env") — future maintainers will know not to break the
+  chain.
+
+- **M2 — module-load side effect → FIXED.** Standard Hono split:
+  - `src/app.ts`: routes-only. Pure data, no side effects.
+  - `src/index.ts`: `serve(...)` bootstrap only.
+  - `tests/sanity.test.ts`: imports from `'../src/app.js'`. No HTTP
+    listener leaks; future tests can `import { app }` freely.
+
+- **L1 + O1 — env-var Zod schema → FIXED in one consolidated module.**
+  `EnvSchema` covers `NODE_ENV` (enum + default), `PORT` (coerced int
+  + default), `DATABASE_URL` (URL-validated, required),
+  `HELIUS_API_KEY` / `HELIUS_WEBHOOK_SECRET` (`.min(1).optional()` —
+  empty strings rejected, missing values pass through to Task #14).
+  Parse runs once at module load → fail-fast on missing vars.
+  `drizzle.config.ts` and `logger.ts` consume the typed `env`;
+  non-null assertion gone.
+
+**Backend-eng's three claims confirmed:**
+
+1. ✅ M1: `import 'dotenv-mono/load'` side-effect in `env.ts`;
+   ESM dep-graph guarantees it runs before any downstream
+   `process.env` read.
+2. ✅ M2: `src/app.ts` has routes only; `src/index.ts` has `serve()`
+   only. Test imports from `app.ts`.
+3. ✅ L1/O1: Zod schema covers all five env vars; `drizzle.config.ts`
+   uses `env.DATABASE_URL`.
+
+**Three informational notes (not findings):**
+
+- **O1.** `EnvSchema.parse(process.env)` runs once at module load.
+  Env changes after startup aren't picked up. Not a production
+  concern (process restarts on env changes); minor footgun for
+  `tsx watch` if `.env` is edited mid-run.
+- **O2.** `dotenv-mono/load` is a CJS side-effect module; the
+  indexer's ESM import works because ESM tolerates side-effect
+  imports of CJS. Confirmed working per backend-eng's test runs.
+- **O3.** Fail-fast Zod parse is better DX than the previous cryptic
+  drizzle error path. Aligns with the PRD's "fail fast on config
+  errors" stance.
+
+**Cross-cutting carryover:** PR #19's L6 (server-side `memcmp`
+filtering) lands when **Task #13** wires the event-handler upsert.
+The Drizzle schema (PR #24, already merged) has indexed columns on
+`(capability_hash)` and `(owner)` — confirm those are the SDK's
+fallback-query paths.
+
+**Mainnet release-gate verdict:** N/A — bootstrap correctness, not a
+flow. Each of Tasks #14/#15/#16 (webhook receiver, event handler,
+integration test) will need its own audit walk when business logic
+lands on this corrected scaffold.
+
+Cleared to merge. Tight, correct fixes; no scope creep.
