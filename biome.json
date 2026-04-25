@@ -20,7 +20,8 @@
       "!packages/idl/src/generated",
       "!packages/idl/src/bazaar-*.ts",
       "!packages/idl/idl",
-      "!apps/indexer/drizzle"
+      "!apps/indexer/drizzle",
+      "!programs/tests/fixtures"
     ]
   },
   "formatter": {
