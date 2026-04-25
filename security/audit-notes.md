@@ -807,3 +807,286 @@ findings on register()` (`bcd0070`). Re-walked:
 `register_service` specifically. Future flows (`hire`, `confirm`,
 `claimTimeout`, `dispute`) will each need their own audit walk
 when they land.
+
+---
+
+## PR #19 — feature/sdk-discover-impl — 2026-04-25
+**Verdict:** APPROVED (with one Medium and five Low non-blocking findings).
+Read-only flow; no signing, no funds movement. The Medium (response
+validation) is the only finding that has cross-tenant impact.
+
+**Scope of review:**
+- `packages/sdk/src/discover.ts` (new, +213) — Zod input → API path → RPC fallback → in-memory filter/sort
+- `packages/sdk/src/client.ts` (+9 / -3) — adds `discoveryApiUrl` config + wires `discover()`
+- `packages/sdk/src/errors.ts` (+6) — `DiscoveryAPIError`, `RPCFallbackFailedError`
+- `packages/sdk/src/types.ts` (+4 / -2) — `DiscoverInput.sort` enum tightened to three values + `limit` field
+- `packages/sdk/src/index.ts` (+2) — error re-exports
+- `packages/sdk/tests/discover.test.ts` (new, +458) — unit tests
+
+**Five focus-area answers (sdk-eng's checklist):**
+
+1. ✅ **No user input → shell/path.** All `DiscoverInput` fields flow
+   through `URL.searchParams.set(...)` (proper percent-encoding) or
+   in-memory `Array.filter` / sort. No `child_process`, no `eval`,
+   no `Function(...)`, no file I/O, no template-string interpolation
+   into anything executable. Confirmed by grep of `discover.ts`.
+2. ⚠️ **Error message data flow — mostly clean, one note (L1 below).**
+   `DiscoveryAPIError` carries `${err.message}` for fetch failures
+   (which can include the request URL with query string — currently
+   only user filter values, low sensitivity) and `${res.status} ${res.statusText}`
+   for non-OK responses (no body content). `RPCFallbackFailedError`
+   carries `${err.message}` from the underlying RPC call — Anchor /
+   web3.js error strings don't include wallet keys or signed data.
+   No JWT in scope on this path. Defensive note: if any future change
+   adds an auth token to the URL query string, error messages would
+   leak it.
+3. ✅ **`AbortSignal.timeout(10_000)` usage correct.** Modern API
+   (Node 18+, Chrome 103+, all M0-target environments). Auto-aborts
+   after 10s; the abort lands in the `try` and surfaces as a
+   `DiscoveryAPIError`, triggering the RPC fallback. Clean.
+4. ✅ **RPC fallback doesn't expose wallet/connection internals.**
+   `fetchFromRPC` builds an `AnchorProvider` with the wallet, calls
+   `program.account.serviceListing.all()` (read-only — translates to
+   `connection.getProgramAccounts(programId, filters)`), and maps
+   results. Wallet's `signTransaction` / `signAllTransactions` are
+   never invoked. Wallet `publicKey` does flow into Anchor's
+   provider but is not transmitted in the RPC payload (the request
+   is purely program-account scan). No connection secrets exposed
+   in returned data. **Side note (informational):** the wallet is
+   *required* even for read-only discovery — UX cost for public
+   browse pages, not a security finding.
+5. ✅ **Zod schema covers `DiscoverInput` surface.** All six fields
+   present and bounded:
+   - `capability: z.string().max(256)` — matches PR #12 `MetadataSchema.capability` ceiling.
+   - `minReputation: z.number().int().min(0).max(100)` — matches the doc range.
+   - `maxPrice: z.bigint().nonnegative()` — sensible.
+   - `maxLatency: z.number().int().positive()` — sensible.
+   - `sort: z.enum(['price_asc', 'reputation_desc', 'latency_asc'])` — three options match `types.ts`.
+   - `limit: z.number().int().min(1).max(200)` — `MAX_LIMIT = 200` constant.
+   No drift between the type and the schema; nothing un-validated.
+
+**Findings:**
+
+- **Critical:** none.
+- **High:** none.
+
+- **Medium:**
+  - **M1. Discovery API response is not validated.** `body = (await res.json()) as APIResponse`
+    is a TypeScript-only assertion with **no runtime checks**. The
+    body is then mapped directly into `ServiceProvider[]` and
+    returned to the consumer. A compromised, misconfigured, or
+    malicious Discovery API could deliver:
+    - Adversarial `endpoint` strings (`javascript:alert(1)`,
+      `data:text/html,…`, megabytes of garbage) — bypasses the
+      schema discipline that `register()` applies at write time
+      because the SDK doesn't re-validate at read time.
+    - Invalid base58 in `entry.listing` / `entry.owner` — `new PublicKey(...)`
+      throws `Error: Invalid public key input`, which escapes
+      uncaught (not wrapped in `DiscoveryAPIError`).
+    - Non-numeric `entry.priceUsdc` — `BigInt(...)` throws SyntaxError.
+    - Out-of-range `reputation` (negative, >100) or `pricingModel` —
+      passes through to consumers as a valid-looking number.
+    - Massive `body.services` arrays — memory exhaustion before the
+      `limit` slice would have applied (RPC path applies limit AFTER
+      mapping, but the map itself materialises everything).
+
+    Trust model today: AgentBazaar runs the API. But (a) compromise
+    of the API exposes every SDK consumer at once, (b) a misconfigured
+    `discoveryApiUrl` (dev pointing at a mock that responds with
+    crafted data) gets the same attack surface, (c) the SDK is a
+    public package and consumers can't rely on the API trust
+    boundary in their own threat models.
+
+    **Fix:** add a Zod schema for `APIServiceEntry` (matches the
+    SDK's existing `ServiceProvider` shape) and `z.array(...).max(MAX_LIMIT)`
+    for `body.services`. Validate before mapping; on failure, throw
+    `DiscoveryAPIError(\`malformed response: …\`)` so the RPC
+    fallback kicks in. Same approach as `MetadataSchema` does for
+    the Pinata payload. Non-blocking for devnet; **high priority
+    before mainnet** — the endpoint XSS angle is the same surface
+    M1 from PR #17 and L2 from PR #12 closed at the write side.
+
+- **Low:**
+  - **L1. `new URL('/services', baseUrl)` is outside the `try`.**
+    A malformed `discoveryApiUrl` raises a synchronous `TypeError`
+    that escapes `discoverServices` uncaught. Result: the consumer
+    gets a raw `TypeError`, the RPC fallback never triggers. Wrap
+    URL construction in the existing try/catch, OR validate
+    `discoveryApiUrl` at constructor time
+    (`new URL(discoveryApiUrl)` to fail-fast).
+  - **L2. `res.json()` parse errors bypass `DiscoveryAPIError`.**
+    The `await res.json()` call is outside the try/catch and after
+    the `if (!res.ok)` check. If the API returns 200 OK with HTML
+    (typical when a load balancer serves an error page) or any
+    non-JSON body, `.json()` throws SyntaxError and skips the RPC
+    fallback. Move `res.json()` inside try/catch and throw
+    `DiscoveryAPIError`.
+  - **L3. `process.env.DISCOVERY_API_URL` may throw in browsers.**
+    The default URL chain `discoveryApiUrl ?? process.env.DISCOVERY_API_URL ?? 'http://localhost:8787'`
+    references `process` directly. Browser bundlers without a
+    `process` shim throw `ReferenceError`. tsup's default config
+    doesn't define `process` for ESM browser builds. Guard with
+    `typeof process !== 'undefined' ? process.env?.DISCOVERY_API_URL : undefined`,
+    or move env-reading to a build-time constant. Minor; SDK
+    consumers running on Node are unaffected.
+  - **L4. RPC fallback returns hex hash for `capability`, not the
+    original string.** API path returns the human-readable string
+    from off-chain metadata; RPC fallback returns
+    `Buffer.from(capabilityHash).toString('hex')`. Same field name,
+    semantically different value. A consumer doing
+    `provider.capability === 'text-summarization'` works through
+    the API, fails on fallback. Either: (a) document the difference
+    on `ServiceProvider.capability`, (b) add a discriminator
+    (`capabilitySource: 'api' | 'rpc'`), or (c) fetch metadata in
+    fallback (network cost, defeats the fallback's resilience role).
+    Cosmetic; can wait for the SDK-stability pass.
+  - **L5. `endpoint: ''` in RPC fallback is ambiguous.** Empty
+    string is indistinguishable from a (now-impossible, given PR
+    #17 M1) registered-with-empty-endpoint listing. Either change
+    `ServiceProvider.endpoint` to `string | undefined` and use
+    `undefined`, or document the fallback semantic.
+
+**Additional observations (informational):**
+
+- **O1.** Wallet is required even for read-only discovery. UX
+  consequence (public browse pages need a wallet); not a security
+  finding. Possible future shape: accept `wallet?: AnchorWallet`
+  and synthesize a read-only provider when omitted.
+- **O2.** Cross-cutting carry-over from PR #17 M1 — the Discovery
+  API trusts on-chain metadata_uri pointers to off-chain JSON.
+  If a malicious agent registers via a bypass route (anything
+  not going through our SDK), they could plant adversarial
+  metadata. The Discovery API itself should re-validate
+  metadata before serving. Flag for **backend-eng** when the
+  indexer / API land in M1.
+- **O3.** The `applyFiltersAndSort` function:
+  - `out.filter((r) => r.isActive)` — first filter; correct.
+  - `r.sla.maxLatencyMs == null || r.sla.maxLatencyMs <= maxMs` —
+    treats unknown latency as acceptable. Defensible default,
+    but worth noting: a malicious provider could omit
+    `maxLatencyMs` to game the `maxLatency` filter and appear in
+    results regardless. Consider documenting or flipping the
+    default to "exclude unknown".
+  - Sort comparators handle bigint correctly via `<` / `>`.
+- **O4.** Tests cover 65/65 scenarios per sdk-eng's note. Good
+  breadth. Coverage gap follows the same pattern as PR #17:
+  Anchor codec / IDL-arg shape on the RPC path is mocked, so the
+  end-to-end fallback against `solana-test-validator` isn't
+  exercised. Same handoff to qa-test-eng.
+- **O5.** Default URL `'http://localhost:8787'` is a developer
+  convenience. Production consumers should always pass an
+  explicit `discoveryApiUrl`. Worth documenting in the SDK
+  README when it exists.
+
+**Recommended fixes (for sdk-eng follow-up, ordered by urgency):**
+
+1. **Before mainnet:** add Zod validation to the Discovery API
+   response (M1). Mirror `MetadataSchema` discipline at the
+   read boundary.
+2. **Soon:** L1 (wrap URL construction), L2 (json parse →
+   `DiscoveryAPIError`), L3 (browser-safe `process.env` guard).
+3. **DX polish:** L4 (capability semantics across paths), L5
+   (`endpoint` ambiguity), O1 (read-only wallet relaxation).
+
+**Mainnet release-gate verdict (security side):**
+**Devnet integration cleared.** Mainnet is gated on M1 — once
+that lands, `discover()` is release-ready. None of the Lows
+expose a real-money risk; they're DX/correctness improvements.
+
+Future flows: `hire` (the substantial one — escrow + USDC
+transfer), `confirm` / `claimTimeout` / `dispute` (release paths)
+each need their own walk when they land.
+
+### Follow-up — team-lead's targeted-review points (2026-04-25)
+
+team-lead routed five specific check-points after this audit was
+already filed. Cross-walking each against the existing findings
+and surfacing two additional Lows the original walkthrough missed.
+
+- **SSRF from `discoveryApiUrl` user-controlled config?** **Not in
+  the SDK's threat model.** `discoveryApiUrl` is read once at
+  `AgentBazaar` constructor time from
+  `AgentBazaarConfig.discoveryApiUrl ?? process.env.DISCOVERY_API_URL ?? 'http://localhost:8787'` —
+  not from any per-call user input on `discover()`. Threat surface
+  matches `rpc` config: if a consuming application passes a URL
+  from THEIR end-user (e.g., a "configure your indexer" form)
+  through unvalidated, that's the embedder's responsibility —
+  config-injection on their side, not SSRF in our code path. No
+  SDK action; defensive note for the dashboard / wrapper-app
+  design when those land.
+- **Fetch timeout/retry — does `discover()` hang on a slow API?**
+  No. `AbortSignal.timeout(10_000)` enforces a 10 s ceiling on
+  the API path. There is **no retry** at the API level —
+  intentional graceful degradation per PRD §8: one shot, fall
+  through to RPC fallback on any `DiscoveryAPIError`. No
+  retry-storm risk. Minor caveat: errors that aren't wrapped in
+  `DiscoveryAPIError` (L1 URL ctor / L2 json parse) escape
+  uncaught and skip the fallback.
+- **RPC fallback `getProgramAccounts` filter / pagination?** New
+  **L6** below — original walkthrough understated this.
+- **Zod schema — `capability` length, URL/string injection via
+  `sort`?** `capability: z.string().max(256)` matches PR #12's
+  on-chain bound. `sort: z.enum(['price_asc', 'reputation_desc', 'latency_asc'])` —
+  invalid strings rejected at parse time; no string-injection
+  vector. ✅ Both already covered in focus-area 5.
+- **`minReputation` + RPC fallback's hard-coded `reputation: 0` —
+  silent zero-result?** Confirmed real; new **L7** below.
+
+**Two additional Low findings:**
+
+- **L6. RPC fallback does a full-table scan with no server-side
+  filter or pagination.** Anchor's
+  `program.account.serviceListing.all()` passes only the
+  account-discriminator filter and returns every matching account.
+  At MVP scale this is fine. Two scaling concerns:
+  1. **Memory.** All listings are materialised into a
+     `ServiceProvider[]` before `applyFiltersAndSort` slices to
+     `limit`. A marketplace with 10k+ listings produces a heavy
+     in-memory array per `discover()` call; a hot dashboard
+     refresh path could OOM Cloudflare Workers' 128 MB ceiling.
+  2. **RPC payload limit.** Solana RPC's default
+     `getProgramAccounts` response cap is 5 MB; some providers
+     (Helius paid tier) lift this, but a public RPC starts
+     truncating or 503'ing past the limit.
+
+  Both deferred in M0 because the marketplace is empty.
+  **Fix path** when scale matters: pass filters via
+  `program.account.serviceListing.all([{ memcmp: {...} }])` for
+  the `capability_hash` exact match (cheapest filter), AND/OR add
+  `dataSlice` to fetch only the first ~100 bytes for the filter
+  pass. Long-term: lean on the indexer and treat RPC fallback as
+  best-effort with a "showing first N" disclaimer.
+
+- **L7. `minReputation` + RPC fallback → silent zero-results.**
+  Per sdk-eng's documented design choice, RPC fallback hard-codes
+  `reputation: 0` for every listing (the field isn't on-chain in
+  M0). `applyFiltersAndSort` then filters
+  `r.reputation >= input.minReputation`. Consequence:
+  - `discover({ minReputation: 50 })` with API up: real matches.
+  - Same call with API down → RPC fallback: returns `[]`,
+    indistinguishable from "no providers match".
+
+  **User sees an empty list and assumes nothing's available,
+  when the data is just unrecoverable in fallback mode.**
+
+  Recommended fix:
+  1. **M0 short-term:** when `minReputation > 0` is set and the
+     RPC fallback is taken, either (a) skip the `minReputation`
+     filter and surface a flag/warning in the return value, or
+     (b) throw a typed error (`DegradedDiscoveryError`?) so the
+     caller can render "reputation filtering unavailable" UX.
+  2. **M1:** once `bazaar-evaluator` stores reputation on-chain
+     (M1 scope per CLAUDE.md), the fallback can read real data
+     and the asymmetry disappears.
+
+  Either way, document as a **known M0 gap** in the SDK README
+  + PR changelog.
+
+**No change to mainnet verdict.** L6 / L7 are Lows; neither
+exposes a real-money risk. M1 (response Zod validation) remains
+the single mainnet release-gate.
+
+**Routing:** L6 informs the indexer / Discovery API design
+(backend-eng's M1 work — server-side filtering must support
+`capability_hash` memcmp at minimum). L7 informs both SDK README
++ dashboard UX (frontend-eng when they land).
