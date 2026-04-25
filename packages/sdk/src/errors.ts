@@ -115,3 +115,82 @@ export class IDLMismatchError extends AgentBazaarError {
     this.got = got;
   }
 }
+
+// ─── Escrow errors ───────────────────────────────────────────────────────────
+
+/** Thrown when the escrow PDA does not exist on-chain. */
+export class EscrowNotFoundError extends AgentBazaarError {
+  constructor(escrowId: string, options?: ErrorOptions) {
+    super(`Escrow not found: ${escrowId}`, options);
+  }
+}
+
+/** Thrown when hire() is called but the escrow PDA already exists with a different state. */
+export class EscrowAlreadyExistsError extends AgentBazaarError {
+  constructor(escrowId: string, options?: ErrorOptions) {
+    super(`Escrow already exists: ${escrowId}`, options);
+  }
+}
+
+/** Thrown when deliver() is called but delivery was already submitted. */
+export class EscrowAlreadyDeliveredError extends AgentBazaarError {
+  constructor(escrowId: string, options?: ErrorOptions) {
+    super(`Delivery already submitted for escrow: ${escrowId}`, options);
+  }
+}
+
+/** Thrown when confirm() is called but the escrow was already confirmed. */
+export class EscrowAlreadyConfirmedError extends AgentBazaarError {
+  constructor(escrowId: string, options?: ErrorOptions) {
+    super(`Escrow already confirmed: ${escrowId}`, options);
+  }
+}
+
+/** Thrown when the escrow deadline has passed (e.g., deliver() called too late). */
+export class EscrowExpiredError extends AgentBazaarError {
+  constructor(escrowId: string, options?: ErrorOptions) {
+    super(`Escrow deadline has passed: ${escrowId}`, options);
+  }
+}
+
+/** Thrown when claimTimeout() is called but the deadline has not yet passed. */
+export class EscrowNotExpiredError extends AgentBazaarError {
+  constructor(escrowId: string, options?: ErrorOptions) {
+    super(`Escrow deadline has not yet passed: ${escrowId}`, options);
+  }
+}
+
+/** Thrown when dispute() is called but the escrow is already in a disputed state. */
+export class EscrowAlreadyDisputedError extends AgentBazaarError {
+  constructor(escrowId: string, options?: ErrorOptions) {
+    super(`Escrow already disputed: ${escrowId}`, options);
+  }
+}
+
+/** Thrown when an action requires the escrow to be resolved but it is not. */
+export class EscrowAlreadyResolvedError extends AgentBazaarError {
+  constructor(escrowId: string, options?: ErrorOptions) {
+    super(`Escrow already resolved (confirmed or timeout-claimed): ${escrowId}`, options);
+  }
+}
+
+/** Thrown when confirm() or claimTimeout() is called but no delivery has been submitted yet. */
+export class DeliveryNotSubmittedError extends AgentBazaarError {
+  constructor(escrowId: string, options?: ErrorOptions) {
+    super(`No delivery submitted for escrow: ${escrowId}`, options);
+  }
+}
+
+/** Thrown when the caller is not the authorized party (buyer or seller) for the escrow. */
+export class UnauthorizedError extends AgentBazaarError {
+  constructor(message?: string, options?: ErrorOptions) {
+    super(message ?? 'Unauthorized: caller is not the authorized party', options);
+  }
+}
+
+/** Thrown when hire() references a listing that does not exist or is inactive. */
+export class InvalidListingError extends AgentBazaarError {
+  constructor(listingId: string, options?: ErrorOptions) {
+    super(`Invalid or inactive listing: ${listingId}`, options);
+  }
+}

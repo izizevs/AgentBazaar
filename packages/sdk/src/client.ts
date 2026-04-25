@@ -1,19 +1,25 @@
 import {
   Connection,
-  type PublicKey,
+  PublicKey,
   type Transaction,
   type VersionedTransaction,
 } from '@solana/web3.js';
+import { claimEscrowTimeout } from './claimTimeout.js';
+import { confirmDelivery } from './confirm.js';
+import { deliverJob } from './deliver.js';
 import { discoverServices } from './discover.js';
+import { openEscrowDispute } from './dispute.js';
 import { NotImplementedError } from './errors.js';
+import { DEVNET_USDC_MINT } from './escrow-utils.js';
+import { hireAgent } from './hire.js';
 import { registerService } from './register.js';
 import type {
   ConfirmInput,
   DeliverInput,
   DiscoverInput,
   DisputeInput,
+  EscrowHandle,
   HireInput,
-  Job,
   RegisterInput,
   RegisterResult,
   ServiceProvider,
@@ -38,22 +44,26 @@ export interface AgentBazaarConfig {
   pinataJwt?: string;
   /** Discovery API base URL. Defaults to DISCOVERY_API_URL env var or localhost:8787. */
   discoveryApiUrl?: string;
+  /** USDC mint address. Defaults to Circle devnet USDC (4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU). */
+  usdcMint?: string;
 }
 
 export class AgentBazaar {
   readonly connection: Connection;
   readonly wallet: AnchorWallet;
   readonly discoveryApiUrl: string;
+  readonly usdcMint: PublicKey;
   // Private: prevents accidental exposure via JSON.stringify(client) or error-capture tooling.
   readonly #pinataJwt: string | undefined;
 
-  constructor({ wallet, rpc, pinataJwt, discoveryApiUrl }: AgentBazaarConfig) {
+  constructor({ wallet, rpc, pinataJwt, discoveryApiUrl, usdcMint }: AgentBazaarConfig) {
     this.wallet = wallet;
     this.connection = typeof rpc === 'string' ? new Connection(rpc, 'confirmed') : rpc;
     this.#pinataJwt = pinataJwt;
     // L3: guard process.env access for browser environments without a process polyfill
     const envUrl = typeof process !== 'undefined' ? process.env?.DISCOVERY_API_URL : undefined;
     this.discoveryApiUrl = discoveryApiUrl ?? envUrl ?? 'http://localhost:8787';
+    this.usdcMint = usdcMint ? new PublicKey(usdcMint) : DEVNET_USDC_MINT;
   }
 
   /**
@@ -83,38 +93,78 @@ export class AgentBazaar {
   }
 
   /**
-   * Hire an agent by creating an escrow and funding it with USDC.
+   * Hire an agent by creating a USDC escrow on-chain.
+   *
+   * Validates input, derives escrow + vault PDAs, checks buyer USDC balance,
+   * and calls bazaar-escrow::create_escrow with 3-attempt retry + priority fee escalation.
+   * Idempotent: if the same buyer+listing+nonce escrow already exists, returns the existing handle.
+   *
+   * **Production retry safety**: if `hire()` throws after an ambiguous network failure
+   * (tx may have landed but confirmation timed out), calling `hire()` again with a new
+   * `Date.now()`-derived nonce creates a second escrow and a second USDC deposit.
+   * Pass an explicit `input.nonce` derived from stable inputs (buyer + listing + budget)
+   * so that retries resolve to the same PDA and the idempotency path is taken instead.
+   *
+   * @throws {ValidationError} if input is invalid
+   * @throws {InvalidListingError} if agentId is not a valid public key
+   * @throws {InsufficientFundsError} if buyer has insufficient USDC
+   * @throws {EscrowAlreadyExistsError} if escrow exists in a non-created state
+   * @throws {TransactionFailedError} if the transaction fails after all retry attempts
    */
-  async hire(_agentId: string, _input: HireInput): Promise<Job> {
-    throw new NotImplementedError('hire');
+  async hire(agentId: string, input: HireInput): Promise<EscrowHandle> {
+    return hireAgent(this.connection, this.wallet, agentId, input, this.usdcMint);
   }
 
   /**
-   * Submit job result as the hired agent.
+   * Submit job result as the hired agent (seller side).
+   *
+   * @throws {EscrowNotFoundError} if escrow does not exist
+   * @throws {EscrowAlreadyDeliveredError} if delivery already submitted
+   * @throws {EscrowAlreadyResolvedError} if escrow is in a terminal state
+   * @throws {ValidationError} if resultUri is empty or resultHash is not 32 bytes
+   * @throws {TransactionFailedError} if the transaction fails
    */
-  async deliver(_escrowId: string, _input: DeliverInput): Promise<string> {
-    throw new NotImplementedError('deliver');
+  async deliver(escrowId: string, input: DeliverInput): Promise<string> {
+    return deliverJob(this.connection, this.wallet, escrowId, input, this.usdcMint);
   }
 
   /**
-   * Confirm job completion as the client and release escrow to the agent.
+   * Confirm job completion as the buyer, releasing USDC to the seller.
+   *
+   * @throws {EscrowNotFoundError} if escrow does not exist
+   * @throws {DeliveryNotSubmittedError} if no delivery has been submitted yet
+   * @throws {EscrowAlreadyConfirmedError} if already confirmed
+   * @throws {ValidationError} if score is outside 0–100
+   * @throws {TransactionFailedError} if the transaction fails
    */
-  async confirm(_escrowId: string, _input: ConfirmInput): Promise<string> {
-    throw new NotImplementedError('confirm');
+  async confirm(escrowId: string, input: ConfirmInput): Promise<string> {
+    return confirmDelivery(this.connection, this.wallet, escrowId, input, this.usdcMint);
   }
 
   /**
-   * Claim escrow funds back after SLA timeout has elapsed.
+   * Claim escrow funds as the seller after the SLA timeout has elapsed.
+   *
+   * @throws {EscrowNotFoundError} if escrow does not exist
+   * @throws {DeliveryNotSubmittedError} if no delivery was submitted
+   * @throws {EscrowNotExpiredError} if the deadline has not yet passed (on-chain)
+   * @throws {EscrowAlreadyResolvedError} if escrow is in a terminal state
+   * @throws {TransactionFailedError} if the transaction fails
    */
-  async claimTimeout(_escrowId: string): Promise<string> {
-    throw new NotImplementedError('claimTimeout');
+  async claimTimeout(escrowId: string): Promise<string> {
+    return claimEscrowTimeout(this.connection, this.wallet, escrowId, this.usdcMint);
   }
 
   /**
-   * Open a dispute against a completed or in-progress job.
+   * Open a dispute against an active escrow, triggering an immediate refund (M1 stub).
+   *
+   * @throws {EscrowNotFoundError} if escrow does not exist
+   * @throws {EscrowAlreadyDisputedError} if dispute already opened
+   * @throws {EscrowAlreadyResolvedError} if escrow is in a terminal state
+   * @throws {ValidationError} if reason is empty
+   * @throws {TransactionFailedError} if the transaction fails
    */
-  async dispute(_escrowId: string, _input: DisputeInput): Promise<string> {
-    throw new NotImplementedError('dispute');
+  async dispute(escrowId: string, input: DisputeInput): Promise<string> {
+    return openEscrowDispute(this.connection, this.wallet, escrowId, input, this.usdcMint);
   }
 
   /**

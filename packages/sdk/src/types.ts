@@ -80,8 +80,19 @@ export interface HireInput {
   budget: bigint;
   /** SLA terms agreed for this job. */
   sla: SlaParams;
-  /** Job timeout in seconds. */
+  /** Job timeout in seconds from now. */
   timeout: number;
+  /** Optional nonce (u64). Defaults to Date.now() millis. Pass the same nonce to achieve idempotency. */
+  nonce?: bigint;
+}
+
+export interface EscrowHandle {
+  /** The escrow PDA address. */
+  escrowPda: PublicKey;
+  /** The vault PDA address (holds USDC until settlement). */
+  vaultPda: PublicKey;
+  /** Transaction signature. Empty string when returning an existing escrow (idempotent path). */
+  signature: string;
 }
 
 export interface Job {
