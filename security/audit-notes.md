@@ -1090,3 +1090,109 @@ the single mainnet release-gate.
 (backend-eng's M1 work — server-side filtering must support
 `capability_hash` memcmp at minimum). L7 informs both SDK README
 + dashboard UX (frontend-eng when they land).
+
+### Follow-up — 2026-04-25 re-review (PR #21 / `feature/sdk-discover-audit-fixes`)
+
+**Status:** all six addressed findings (M1 + L1–L5) verified clean.
+**Verdict upgraded to APPROVED — MAINNET-READY for `discover()`**
+(modulo PR #2 M2 IDL `price_lamports` rename still pending; L6/L7
+remain non-gating per the section above, both routed elsewhere).
+
+PR #21 walked:
+
+- **M1 — Discovery API response Zod-validated → FIXED.** New
+  `APIServiceEntrySchema` covers every field with on-chain-aligned
+  bounds:
+  - `priceUsdc: z.string().regex(/^\d+$/)` — strict numeric
+    decimal-string; rules out negatives, hex, scientific notation
+    before `BigInt(...)`.
+  - `pricingModel: z.number().int().min(0).max(3)` — matches the
+    on-chain `PRICING_MODEL_MAX = 3`.
+  - `sla` nested object with bounds matching PRD §6.1
+    (`maxLatencyMs` non-negative int, `minUptimePct` 0–10000 bps,
+    `responseFormat` ≤16, `jsonSchemaUri` ≤64, `customParams` ≤2,
+    each entry capped at 16/32 chars).
+  - `endpoint: z.string().url().max(256).refine(startsWith('https://'))` —
+    exact symmetry with PR #17 M1 (write side) and PR #12 L2
+    (avatar). The `javascript:` / `data:` / `http:` /
+    megabyte-payload vectors all close.
+  - `reputation: 0–100`, `jobsCompleted: nonneg`, `isActive: bool`.
+
+  `APIResponseSchema` wraps `services: z.array(...).max(MAX_LIMIT)`,
+  closing the array-size DoS vector. Parse failure throws
+  `DiscoveryAPIError` so the RPC fallback fires cleanly.
+
+- **L1 — `new URL()` inside try → FIXED.** URL construction now
+  lives inside the existing
+  `try { ... } catch { throw DiscoveryAPIError }` block.
+
+- **L2 — `res.json()` parse → FIXED.** sdk-eng consolidated JSON
+  parsing and Zod validation into a single try block:
+  `parsed = APIResponseSchema.parse(await res.json())`. JSON
+  SyntaxError and Zod parse errors both surface as
+  `DiscoveryAPIError`. Slightly different from the
+  "two separate try blocks" recommendation (informational note
+  O7 below) but functionally equivalent.
+
+- **L3 — `process.env` browser guard → FIXED.**
+  `typeof process !== 'undefined' ? process.env?.DISCOVERY_API_URL : undefined`
+  exactly matches the recommendation.
+
+- **L4 — capability hex/string semantic → DOCUMENTED.** Comment
+  in `fetchFromRPC`:
+  > L4: capability is the hex of the on-chain capability_hash —
+  > the original string is not stored on-chain (M0). API path
+  > returns the human-readable string; callers must handle both.
+
+- **L5 — `endpoint` ambiguity → FIXED.** `ServiceProvider.endpoint`
+  is now `string | undefined`. RPC fallback sets
+  `endpoint: undefined`. Test
+  `L5: sets endpoint to undefined (stored in IPFS metadata, not on-chain)`
+  asserts the new contract.
+
+**Test coverage delta:** four new tests — malformed JSON →
+fallback, invalid Zod schema (`javascript:` endpoint) → fallback,
+bad baseUrl → fallback, RPC `endpoint` is `undefined`. 69 SDK +
+21 IDL tests pass.
+
+**Two informational notes (not findings):**
+
+- **O7.** L2 was resolved with one consolidated try block instead
+  of two. Functionally equivalent. No action.
+
+- **O8 (residual Low — non-gating).** `listing` and `owner` are
+  `z.string()` but **not** validated as base58 PublicKeys. A
+  non-base58 string survives Zod parsing, then crashes
+  synchronously in `new PublicKey(entry.listing)` inside
+  `parsed.services.map(...)` — which lives **outside** the try
+  block. The throw escapes uncaught, bypassing the RPC fallback.
+  Same class of issue as L1/L2 for one specific edge case the
+  M1 fix didn't cover.
+
+  Threat model: API is internal in M0, realistic exposure is low.
+  Two-line fix, either:
+  ```ts
+  // (a) tighten the schema:
+  listing: z.string().refine(
+    (s) => { try { new PublicKey(s); return true } catch { return false } },
+    'Invalid base58 public key',
+  ),
+  // owner: same
+  ```
+  OR:
+  ```ts
+  // (b) widen the try block to include the .map():
+  try {
+    parsed = APIResponseSchema.parse(await res.json());
+    return parsed.services.map(...);
+  } catch (err) { throw new DiscoveryAPIError(...); }
+  ```
+  Logged for sdk-eng to fold into a future polish pass; not
+  blocking PR #21's merge or the mainnet release-gate.
+
+**Mainnet release-gate verdict (security side):**
+**CLEARED for `discover()`.** Same caveats as the per-method
+audits — `hire`, `confirm`, `claimTimeout`, `dispute` each need
+their own walk when impls land. L6/L7 tracked on backend-eng
+(M1 indexer) and sdk-eng (Task #10) sides. O8 is the only
+residual finding from this re-review.
