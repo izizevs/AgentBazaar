@@ -4658,3 +4658,183 @@ Carryforwards (non-blocking):
 - **I4**: out-of-tree IDL consumers rebuild required (already
   expected as part of Task #38 devnet upgrade-in-place).
 
+---
+
+## PR #74 — Task #41 post-M1.5 indexer cleanup
+
+**Reviewer:** security-auditor
+**Date:** 2026-04-26
+**Branch:** `feature/backend-cleanup-after-m15` → `main`
+**Head SHA:** `f9e3178…`
+**CI status:** ❌ **FAILED** (run 24943801228 — Lint+typecheck pass, **test step fails**)
+
+### Audit depth
+
+**Light** — config + Zod-schema-only refactor, no program / auth /
+fund-flow changes. But CI is red.
+
+### Scope
+
+Two files, +14 / −9:
+
+1. `apps/indexer/src/webhooks/handler.ts` — registry program ID
+   updated from stale M0 hardcode (`GJRgCC…`) to M1.5 address
+   (`ADWoSm…`); both registry and escrow IDs now wrapped in
+   `process.env.<NAME> ?? '<default>'` pattern so a deploy can
+   override without code change.
+2. `apps/indexer/src/webhooks/types.ts` — `transactionError`
+   tightened from `.nullable().optional()` to `.nullable()` (always-
+   present, may be null); `lighthouseData: z.unknown().optional()`
+   field added; field-order reflow for readability.
+
+### Findings
+
+- **Critical:** none.
+- **High:**
+  - **H1. CI is RED.** Test
+    `apps/indexer/tests/webhook.test.ts:90` —
+    `returns 200 and counts relevant registry events` — fails:
+    expected `relevant: 1`, got `relevant: 0`. **Root cause:** the
+    test file's `REGISTRY_PROGRAM_ID` constant
+    (`webhook.test.ts:4`) still holds the stale M0 ID `GJRgCC…`; the
+    handler now matches against the M1.5 ID `ADWoSm…`, so the test
+    payload constructed with the stale ID is correctly classified
+    as not-registry and skipped. The same stale constant lives in
+    `webhook-replay.test.ts:5` and `event-handler.test.ts:10` —
+    those test files are gated on `DATABASE_URL`/`INTEGRATION` and
+    are skipped under the unit-test CI lane, so they don't fail CI
+    but will fail the next time the integration lane runs against a
+    real DB. **Fix:** update the three test-file constants to the
+    M1.5 ID. **Backend-eng's prior claim "typecheck and biome lint
+    both clean" missed the `pnpm test` step.**
+
+- **Medium:**
+  - **M1 (out-of-scope but pre-mainnet critical). SDK still
+    hardcodes the stale registry program ID.**
+    `packages/sdk/src/register.ts:15` defines
+    `PROGRAM_ID = new PublicKey('GJRgCCqkYvAezidpdd3i4p4kRRfJnM1EfGfgqYgchQqd')`
+    and uses it in `PublicKey.findProgramAddressSync(...)` for
+    listing PDA derivation. The on-chain program is at
+    `ADWoSm…`; PDAs derived against the wrong program will not
+    match what's actually stored on chain — `bazaar.register()` and
+    any consumer that calls into `register.ts` will produce a
+    listing PDA that doesn't correspond to a real listing account.
+    This is a **separate critical bug** outside PR #74's stated
+    scope. Open a dedicated issue and assign to sdk-eng. Block
+    mainnet on it.
+  - **M2 (out-of-scope). E2E test helper hardcodes stale ID.**
+    `tests/helpers/tx-utils.ts:11` defines
+    `REGISTRY_PROGRAM_ID = new PublicKey('GJRgCC…')` used by E2E
+    fixtures; same drift surface as M1. Bundle into the same
+    sdk-eng follow-up.
+
+- **Low:**
+  - **L1. `transactionError` tightening — gated on Helius API
+    invariant.** The promotion from `.nullable().optional()` to
+    `.nullable()` makes the field required-but-nullable. This is
+    correct *if* Helius always emits the field on enhanced
+    transactions; if any payload variant (e.g., webhook test events,
+    parsed format, raw events) ever omits the field, every event in
+    that batch will fail Zod parsing and be dropped. Helius's
+    enhanced-transactions docs do guarantee this field is always
+    present in the standard webhook format, so the tightening is
+    sound for the webhook path the indexer subscribes to. Worth a
+    one-line note in the schema or a regression test that asserts
+    `parse({...without transactionError})` rejects (so a future
+    schema rewrite can't silently weaken this).
+  - **L2. Env-var override pattern lacks runtime validation.** The
+    new pattern
+    `process.env.BAZAAR_REGISTRY_PROGRAM_ID ?? 'ADWoSm…'`
+    does not validate that the env value is a well-formed base58
+    pubkey. A malformed env value (typo / truncation) silently
+    propagates as the comparison string for instruction matching —
+    every registry tx is then classified as not-relevant and the
+    webhook returns `relevant: 0` with no error. Recommend wrapping
+    in a `new PublicKey(value).toBase58()` round-trip at module load
+    so a malformed env var fails fast at startup. Non-blocking;
+    deployers will notice via missing data within minutes.
+
+- **Informational:**
+  - **I1. Field reorder is purely cosmetic** (Zod schema field
+    order doesn't affect parsing). ✅ Cleaner reading order, no
+    runtime change.
+  - **I2. `lighthouseData: z.unknown().optional()` is permissive.**
+    Accepting `unknown` means downstream consumers must do their
+    own narrowing if they ever need to read this field. Fine for
+    forward-compat absorption of an opaque Helius field. ✅
+  - **I3. Two further test fixtures hardcode stale IDs.**
+    `packages/sdk/tests/escrow-methods.test.ts:64`,
+    `hire.test.ts:52`, `client.test.ts:100/109/115/122` all use
+    `GJRgCC…` as a placeholder pubkey for *non-program* objects
+    (escrow PDA, listing PDA, etc. — they're just opaque public-key
+    arguments fed to mocked SDK methods). These don't need to be
+    updated as long as the tests don't actually round-trip the value
+    against on-chain state. Cosmetic only.
+  - **I4. PR title says "Task #41"; live TaskList already marked
+    Task #37 = "Task #41 — Post-M1.5 indexer cleanup".** Same
+    task-number drift pattern as PRs #65/#67/#69/#72. Cosmetic.
+
+### Sanity-check answers
+
+1. ✅ **No new admin keys / withdrawal authorities.** Pure config.
+2. ✅ **No fund-flow surface change.** Indexer is a read-only
+   webhook consumer; it never authorizes token transfers.
+3. ✅ **New IDs match `declare_id!` on-chain.** Verified:
+   - `programs/bazaar-registry/src/lib.rs:5` =
+     `ADWoSmfUWLLRGMWZ61xuAMPhDgG77ziqAC5MA9voqLn3` ✅
+   - `programs/bazaar-escrow/src/lib.rs:8` =
+     `EhFptDs4mz6rt7HDmt8pB7ZogiqxUMVhpjB3NvToXxW2` ✅
+   - `.env` and `.env.example` already carry these ✅
+   - `turbo.json` already declares both env vars in `globalEnv`
+     (verified — `BAZAAR_REGISTRY_PROGRAM_ID` /
+     `BAZAAR_ESCROW_PROGRAM_ID` at lines 16–17) ✅
+4. ❌ **CI is RED.** See H1.
+
+### Verdict
+
+✅ **APPROVE for merge** (after fix-up commit `ba5ee38`).
+
+Initial verdict was NEEDS_CHANGES on the failing CI test. Backend-eng
+pushed a follow-up commit at 2026-04-26T00:07Z that updates the three
+test-file `REGISTRY_PROGRAM_ID` constants from the stale M0 value
+(`GJRgCC…`) to the M1.5 value (`ADWoSm…`). Confirmed:
+- Diff `f9e3178..ba5ee385` touches only those three constants — no
+  other changes.
+- CI run `24943892064` is **green** (Lint + typecheck + test, completed
+  2026-04-26T00:07:50Z).
+- Test `webhook.test.ts:97` (`returns 200 and counts relevant registry
+  events`) passes; `webhook-replay.test.ts` and `event-handler.test.ts`
+  test files now also align with the M1.5 ID for the next time the
+  integration lane runs against a real DB.
+
+Substantive scope of the PR remains correct and safe — program ID swap
+matches on-chain `declare_id!`, env-var override pattern is fine, Zod
+tightening is sound.
+
+### Required to flip to APPROVE
+
+Update the M1.5 registry program ID in three test-file constants:
+- `apps/indexer/tests/webhook.test.ts:4`
+- `apps/indexer/tests/webhook-replay.test.ts:5`
+- `apps/indexer/tests/event-handler.test.ts:10`
+
+Optionally also fix M1 (sdk-eng follow-up) and address L2 (env-var
+runtime validation) — those can be separate PRs.
+
+### Carryforwards (for separate follow-up PRs)
+
+- **M1 / M2 (sdk-eng — pre-mainnet blocker).** SDK
+  (`packages/sdk/src/register.ts:15`) and E2E helper
+  (`tests/helpers/tx-utils.ts:11`) still hardcode the stale M0
+  registry program ID. The SDK derives listing PDAs against the
+  wrong program — `bazaar.register()` and dependents are broken
+  against the live on-chain program. Open a dedicated issue and
+  block mainnet cutover on it.
+- **L1 (backend-eng).** Add a regression test asserting Zod rejects
+  payloads missing `transactionError`, so the tightening can't be
+  silently weakened by a future schema rewrite.
+- **L2 (backend-eng).** Validate env-var-supplied program IDs at
+  module load via `new PublicKey(...)` so a typo'd env var fails
+  fast instead of silently dropping all registry txs.
+- **I4 (cosmetic).** PR title task-number drift; harmless.
+
