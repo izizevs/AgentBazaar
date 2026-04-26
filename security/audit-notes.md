@@ -5905,3 +5905,117 @@ preserved.
    propagation (L2) + CORS-omission comment (L3) + 401-on-misconfig
    (L4) + token-length floor (L5).
 
+---
+
+## PR #95 — feature/sdk-discover-api-primary — 2026-04-26
+
+**Verdict:** APPROVED (with non-blocking follow-ups for M3)
+
+**Scope of review:**
+- `packages/sdk/src/discover.ts` (+111/-44) — API-primary path,
+  `/listings` endpoint, Zod `APIResponseSchema` / `ListingDtoSchema`,
+  4xx/5xx split, 10s `AbortSignal.timeout` hardcoded
+- `packages/sdk/src/errors.ts` (+16/-6) — `DegradedDiscoveryError<T>`
+  gains generic `rpcResults: readonly TListing[]` (frozen)
+- `packages/sdk/src/client.ts` (+9/-1) — JSDoc + production URL doc;
+  default still `http://localhost:8787` (NOT the production URL,
+  intentionally — opt-in for dev safety)
+- `packages/sdk/src/index.ts` (+2) — exports `APIResponseSchema`,
+  `ListingDtoSchema`, `ListingDto` for contract testing
+- `packages/sdk/tests/discover.test.ts` (+444/-61) — full rewrite,
+  63 tests including fixture-regression suite
+- `packages/sdk/CHANGELOG.md` (+61) — 0.2.2 entry with migration
+- `packages/sdk/package.json` — version 0.2.1 → 0.2.2
+
+**Trust boundary:** Read-only client-side TS in user wallets / agents.
+No fund-flow, no signing, no `programs/` write path. Worst-case
+failure modes:
+- **Misclassified result** (Zod accepts garbage → caller hires wrong
+  agent) — mitigated by per-field regex + base58 refinement on every
+  pubkey; verified against `apps/api/src/routes/listings.ts`
+  serializer field-for-field (15 fields).
+- **MITM via `http://` override** (caller passes `discoveryApiUrl:
+  'http://attacker'`) — see L1; not blocking because caller-supplied
+  URL is an explicit trust delegation.
+- **RPC fallback storm** (API down → 1k SDK consumers all retry) —
+  mitigated by single-shot fallback (no auto-retry loop); thrown
+  `DegradedDiscoveryError` signals callers to back off.
+
+### Findings
+
+| Sev | ID | File:Line | Issue | Status |
+|-----|----|-----------|-------|--------|
+| Low | L1 | `packages/sdk/src/client.ts:73` | **No `https://` enforcement on `discoveryApiUrl`.** Default is `http://localhost:8787` (acceptable — local dev), and any caller-supplied URL is accepted as-is, including `http://attacker.example`. A network-position attacker on the user's LAN can intercept `discover()` and feed a crafted `/listings` payload that satisfies the Zod schema (every regex still parses) → `discover()` returns attacker-chosen `ServiceProvider[]` → caller `hire()`s the attacker's agent. The blast radius is bounded: `hire()` re-derives the escrow PDA from the listing's on-chain owner, and the escrow vault is program-owned (no admin key); the worst case is the buyer voluntarily routing USDC to the attacker's agent for a job. **Fix in M3:** in the `AgentBazaar` constructor, if `discoveryApiUrl` does not start with `https://` and the URL hostname is not in `{'localhost','127.0.0.1','[::1]'}`, throw a `ValidationError` (or at least `console.warn`). ~5 LOC. | NEEDS-FIX-M3 |
+| Low | L2 | `packages/sdk/src/discover.ts:135` | **`AbortSignal.timeout(10_000)` is hardcoded — not caller-configurable.** This is actually defensive (closes the "caller sets timeout to 0 → instant fallback storm" and "caller sets 10 minutes → UX hang" vectors flagged in the brief). However, it also means a caller on a slow uplink (high-latency mobile, sat-link) that legitimately needs >10s cannot extend it. Acceptable for MVP — flag here for future visibility. | NON-BLOCKING |
+| Low | L3 | `packages/sdk/src/discover.ts:172-183` | **`pricingModel ?? 0`, `priceUsdc ?? 0n`, `reputation ?? 0`, `jobsCompleted ?? 0` silently coerce `null` to safe defaults.** Reasonable for the indexer's eventual-consistency window (listing indexed before its on-chain decoder catches up), but the consumer cannot distinguish "free service (price=0)" from "indexer hasn't decoded the price yet". A buyer using `sort: 'price_asc'` will see un-decoded listings ranked first. **Fix in M3:** filter out listings with `priceUsdcBaseUnits === null` before mapping (or surface them with a `pendingDecode: true` flag in `ServiceProvider`). | FOLLOW-UP-M3 |
+| Low | L4 | `packages/sdk/src/discover.ts:84-91` | **`APIResponseSchema` uses Zod default `.strip()`** (verified by absence of `.passthrough()` / `.strict()`). Unknown fields in the API response are silently dropped — safe, but the SDK does not log/notify when the API has evolved beyond the schema. Acceptable trade-off (avoids breaking SDK consumers when API adds non-critical fields like `slaScoreP95`). The `data` array length cap of `MAX_LIMIT (200)` defends against a misbehaving API returning a giant response. | NOTE |
+| Low | L5 | `packages/sdk/src/discover.ts:38-69` | **No URL/scheme refinement on `metadataUri` / `endpoint` / `jsonSchemaUri`.** A malicious indexer (or an attacker-controlled IPFS gateway) could write `endpoint: 'javascript:alert(1)'` or `endpoint: 'http://internal-svc:8080/admin'`. The SDK passes these strings through unchecked to the caller (dashboard or LLM agent). The dashboard's responsibility to sanitize before render, and the LLM-agent caller's responsibility to validate before HTTP-fetching, but worth noting because the SDK's contract today ("returns a `ServiceProvider`") implies "ready to use". **Fix in M3:** add a `z.string().url()` + `https?:` scheme refinement on `endpoint` and `metadataUri`; surface invalid entries via a separate `degraded: ServiceProvider[]` array rather than silently filtering. | FOLLOW-UP-M3 |
+| Info | I1 | `packages/sdk/src/discover.ts:50-54, 72` | **BigInt fields use `z.string().regex(/^\d+$/)`, NOT `z.coerce.bigint()`.** Per the audit-brief recommendation — confirmed correct: `z.coerce.bigint()` would silently accept `"1.5"`, `"-1"`, `"0x10"`, etc., and `BigInt(s)` would either throw or truncate. The regex anchors `^...$` and `\d+` rejects leading sign / decimal / hex / scientific notation. Test `'rejects fixture with non-decimal priceUsdcBaseUnits'` covers `"1.5"`. ✓ | NOTE |
+| Info | I2 | `packages/sdk/src/discover.ts:42-82` | **Nullable fields use `.nullable()` not `.optional()`.** Per audit-brief — confirmed: `capability`, `slaParams`, `endpoint`, `metadataUri`, `metadata`, `priceUsdcBaseUnits`, `pricingModel`, `jobsCompleted`, `reputationScore`, `satiAgentId`, `createdAt`, `updatedAt` all use `.nullable()`. This matches the API contract (server emits `null`, not omits the field) and prevents silent contract drift if the server starts emitting `null` where it previously omitted. ✓ | NOTE |
+| Info | I3 | `packages/sdk/src/discover.ts:289-296` | **4xx no-fallback path verified.** `if (err.statusCode !== undefined && err.statusCode >= 400 && err.statusCode < 500) throw err;` — surfaces `DiscoveryAPIError` directly without RPC. Test `'400 from API does NOT run RPC fallback (Program.account.serviceListing.all not called)'` asserts `mockAll` is never called. ✓ | NOTE |
+| Info | I4 | `packages/sdk/src/errors.ts:80-97` | **`DegradedDiscoveryError.rpcResults` is `Object.freeze`d** and the `cause` property is forwarded via `super(msg, options)` — both per audit-brief. Generic `<TListing>` typing avoids leaking concrete types into the error subclass. ✓ | NOTE |
+| Info | I5 | `packages/sdk/src/discover.ts:313-318` | **`minReputation > 0` filter dropped on RPC fallback** with `filtersDropped: ['minReputation']` populated in `DegradedDiscoveryError`. Reputation is not on-chain in M0 — the SDK correctly throws rather than silently returning 0 results. Test `'L7: DegradedDiscoveryError.filtersDropped includes minReputation'` covers this. ✓ | NOTE |
+| Info | I6 | `packages/sdk/src/discover.ts:135` | **No retry loop / exponential backoff inside `discover()`** — single-shot API attempt + single-shot RPC fallback. Per audit-brief recommendation ("single-shot is fine"). Caller receives `DegradedDiscoveryError` and is expected to back off at the application layer. ✓ | NOTE |
+| Info | I7 | `packages/sdk/src/client.ts:73` | **Default `discoveryApiUrl` is `http://localhost:8787`** — the audit-brief assumed it would default to the production URL. The actual default is local-dev-friendly, requiring callers to opt into the production endpoint via `discoveryApiUrl` config or `DISCOVERY_API_URL` env. This is **safer** (no implicit network call to a third-party URL from a freshly-installed SDK in test environments) but means the migration guide in CHANGELOG must reach every consumer; otherwise a production deployment that forgets to set the URL will silently fail-over to RPC on every call. | NOTE |
+| Info | I8 | `packages/sdk/src/discover.ts:172-176` | **`new PublicKey(entry.pubkey)` runs after Zod refinement** — order matters: the `isBase58PublicKey` refinement at line 28-35 already constructed and discarded a `PublicKey`; line 173 re-constructs. Mild redundancy (~1 µs per entry) but prevents Zod-pass / PublicKey-throw asymmetry if the underlying `bs58` decoder ever diverges. Acceptable. | NOTE |
+| Info | I9 | `packages/sdk/src/discover.ts:113-140` | **URL construction is inside try/catch** — bad `baseUrl` (e.g., `'not a url'`) becomes `DiscoveryAPIError` rather than uncaught `TypeError`. Test `'L1: bad baseUrl TypeError → DiscoveryAPIError → RPC fallback → DegradedDiscoveryError'` covers this. ✓ | NOTE |
+| Info | I10 | `packages/sdk/tests/discover.test.ts` | **226 tests pass** (1 skipped — INTEGRATION=true gated; not a hidden broken path, just a real-network smoke test). No `it.skip` or commented-out tests detected. Test coverage includes: input validation (7), API primary path (15), 4xx/5xx/network/timeout/malformed-JSON/invalid-schema fallback paths (8), RPC fallback filters/sorts (12), error class hierarchy (5), Zod fixture regression (6), client integration (4). ✓ | NOTE |
+
+### Checklist walkthrough (per audit brief)
+
+1. ✅ **API URL configurable, default exact spelling.** Constructor accepts `apiUrl?: string` (named `discoveryApiUrl`). Default: `http://localhost:8787` (NOT production URL — see I7). Production URL `https://agentbazaar-api.r-443.workers.dev` documented in JSDoc and used by integration test. **Override path lacks https:// validation** — see L1.
+2. ✅ **Zod schema field-for-field aligned with `serializeListing()`.** All 15 fields match: `pubkey`, `owner`, `satiAgentId`, `priceUsdcBaseUnits`, `pricingModel`, `slaParams`, `metadataUri`, `isActive`, `jobsCompleted`, `capability`, `reputationScore`, `endpoint`, `metadata`, `createdAt`, `updatedAt`. BigInt fields use `z.string().regex(/^\d+$/)` (I1). Nullable uses `.nullable()` not `.optional()` (I2).
+3. ✅ **Fallback behaviour correct.** Raises `DegradedDiscoveryError` on network/5xx/schema-fail/timeout (I3, I9). Does NOT raise on 4xx — throws `DiscoveryAPIError` directly (I3). `err.cause` preserved + `err.rpcResults` populated with frozen array (I4). `minReputation` correctly listed in `filtersDropped` (I5).
+4. ✅ **AbortSignal timeout hardcoded at 10s** — not caller-configurable. Defends against the 0-timeout / 10-minute extremes flagged in the brief (L2 — note for future configurability if real-world latency requires).
+5. ✅ **Single-shot per `discover()` call** — no internal retry loop (I6). Caller sees `DegradedDiscoveryError` and is expected to back off; no information-leak via fallback storm beyond what is documented.
+6. ✅ **Schema integrity.** No `.passthrough()` (L4 — strip is acceptable). `total` is `z.number().int().nonnegative()` (line 87). `data` array capped at `MAX_LIMIT (200)`. SLA `customParams` capped at `.max(2)`.
+7. ✅ **Read-only / no fund flow / no signing.** Confirmed by reading `discoverServices()` end-to-end — only `wallet.publicKey` is referenced (via `AnchorProvider`); no `signTransaction` / `signAllTransactions` invoked. No PII / key material in API request (only filter params).
+8. ✅ **Tests.** 226 pass / 1 skipped (INTEGRATION-gated, not broken). 4xx-no-fallback test (line 459), 5xx fallback test (line 369), AbortSignal test (line 472), schema-mismatch test (line 423), fixture round-trip (line 770) — all present and asserted correctly.
+
+### Cross-checks performed
+
+- ✅ `diff` of `serializeListing()` (apps/api/src/routes/listings.ts:34-52) vs `ListingDtoSchema` (packages/sdk/src/discover.ts:42-82) — 15 fields, exact match.
+- ✅ `pnpm -F @agentbazaar/sdk test` — 226 passed / 1 skipped in 871 ms (in audit worktree, fresh install).
+- ✅ `grep -n "passthrough\|strict" packages/sdk/src/discover.ts` — no matches; default `.strip()` confirmed.
+- ✅ `grep -n "AbortSignal\|timeout" packages/sdk/src/discover.ts` — single hardcoded `AbortSignal.timeout(10_000)` at line 135.
+- ✅ `grep -n "https\|http://" packages/sdk/src/{client,discover}.ts` — default URL is `http://localhost:8787`; no scheme validation on caller-supplied URL.
+- ✅ `grep -n "z.coerce.bigint" packages/sdk/src/discover.ts` — no matches; safer `z.string().regex` used throughout.
+- ✅ `Object.isFrozen` test asserts `rpcResults` is frozen (line 726).
+- ✅ Integration test skipped by default (INTEGRATION=true gate); points at real production URL `https://agentbazaar-api.r-443.workers.dev` for manual smoke.
+
+### Verdict
+
+**APPROVED** for merge. No critical or high-severity blockers. The
+read-only scope and absence of a fund-flow / signing surface bound
+the worst case to "buyer hires wrong agent because MITM'd discover()"
+— and that scenario already requires the caller to opt into a
+non-https URL (L1, M3 follow-up). The Zod schema is rigorous,
+field-for-field aligned with the API serializer, BigInt handling is
+safer than `z.coerce.bigint()` per audit-brief recommendation, and
+the 4xx/5xx split + `DegradedDiscoveryError`-with-`rpcResults`
+contract gives callers the signal they need to back off without
+silently misclassifying results.
+
+Trust-boundary specific: the SDK never sends key material to the
+Discovery API, never signs transactions during `discover()`, and the
+RPC fallback uses the caller-supplied `Connection` (no extra
+endpoint provisioning). Non-custodial claim preserved.
+
+**Recommended follow-ups for M3 (in priority order):**
+
+1. **(L1)** In `AgentBazaar` constructor, refuse `discoveryApiUrl`
+   that is `http://` and non-localhost. ~5 LOC, single
+   `ValidationError` throw. Closes the LAN-MITM vector.
+2. **(L3, L5)** Surface "indexer-pending" listings explicitly
+   (`priceUsdcBaseUnits === null`, `endpoint === null`) rather than
+   coercing to safe-default zeros / empty strings — either filter
+   them out before returning or add a `pendingDecode: true` flag
+   on `ServiceProvider`. Plus refine `endpoint` / `metadataUri` with
+   `z.string().url()` + `https?:` scheme check; drop `javascript:` /
+   internal-IP entries.
+3. **(M3 obs)** Emit a structured warning when the API is reachable
+   but the response shape has drifted (Zod parse fail) — today the
+   SDK silently falls back to RPC. A lightweight `console.warn` (or
+   optional callback) lets the caller know schema drift is happening
+   so they can update SDK without a silent-degradation period.
+
