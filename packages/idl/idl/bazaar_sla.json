@@ -1,0 +1,27 @@
+{
+  "address": "26rhkrBkf75ijDoDuhed8m94FkuhB2MukvqtWYEDegd8",
+  "metadata": {
+    "name": "bazaar_sla",
+    "version": "0.1.0",
+    "spec": "0.1.0",
+    "description": "AgentBazaar SLA program — severity scoring + refund split invoked via CPI from escrow.",
+    "repository": "https://github.com/izizevs/AgentBazaar"
+  },
+  "instructions": [
+    {
+      "name": "initialize",
+      "discriminator": [
+        175,
+        175,
+        109,
+        31,
+        13,
+        152,
+        155,
+        237
+      ],
+      "accounts": [],
+      "args": []
+    }
+  ]
+}

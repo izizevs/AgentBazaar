@@ -1,0 +1,27 @@
+{
+  "address": "BxctnHyx9UJT7XobxHK3X548sSoPQB96Ca2fMEzYYMS8",
+  "metadata": {
+    "name": "bazaar_evaluator",
+    "version": "0.1.0",
+    "spec": "0.1.0",
+    "description": "AgentBazaar evaluator stub — full evaluator framework ships in V1.",
+    "repository": "https://github.com/izizevs/AgentBazaar"
+  },
+  "instructions": [
+    {
+      "name": "initialize",
+      "discriminator": [
+        175,
+        175,
+        109,
+        31,
+        13,
+        152,
+        155,
+        237
+      ],
+      "accounts": [],
+      "args": []
+    }
+  ]
+}

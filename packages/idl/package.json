@@ -23,7 +23,7 @@
     "src"
   ],
   "scripts": {
-    "sync": "cp ../../programs/target/idl/bazaar_registry.json ./idl/bazaar_registry.json && cp ../../programs/target/types/bazaar_registry.ts ./src/bazaar-registry.ts",
+    "sync": "for p in bazaar_registry bazaar_escrow bazaar_sla bazaar_evaluator; do cp ../../programs/target/idl/$p.json ./idl/$p.json && cp ../../programs/target/types/$p.ts ./src/${p//_/-}.ts; done",
     "codegen": "node scripts/codegen.mjs",
     "test": "vitest run",
     "typecheck": "tsc --noEmit"
