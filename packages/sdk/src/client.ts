@@ -42,7 +42,15 @@ export interface AgentBazaarConfig {
   rpc: string | Connection;
   /** Pinata JWT for IPFS metadata uploads (required for register()). */
   pinataJwt?: string;
-  /** Discovery API base URL. Defaults to DISCOVERY_API_URL env var or localhost:8787. */
+  /**
+   * Discovery API base URL.
+   * Defaults to the `DISCOVERY_API_URL` env var, then `http://localhost:8787` (local dev).
+   * Production: `https://agentbazaar-api.r-443.workers.dev`
+   *
+   * As of SDK 0.2.2, `discover()` calls this API as the primary source and falls back
+   * to `getProgramAccounts` only on network error / 5xx. Set this to the production URL
+   * in any non-local environment.
+   */
   discoveryApiUrl?: string;
   /** USDC mint address. Defaults to Circle devnet USDC (4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU). */
   usdcMint?: string;

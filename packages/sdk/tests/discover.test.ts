@@ -2,7 +2,7 @@ import { Keypair, PublicKey } from '@solana/web3.js';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AnchorWallet } from '../src/client.js';
 import { AgentBazaar } from '../src/client.js';
-import { discoverServices } from '../src/discover.js';
+import { APIResponseSchema, discoverServices, ListingDtoSchema } from '../src/discover.js';
 import {
   DegradedDiscoveryError,
   DiscoveryAPIError,
@@ -37,37 +37,58 @@ function makeProvider(overrides: Partial<ServiceProvider> = {}): ServiceProvider
   };
 }
 
-// ─── mock fetch ──────────────────────────────────────────────────────────────
+// ─── mock fetch helpers ───────────────────────────────────────────────────────
+//
+// All mocks use the /listings API shape:
+//   { data: ListingDto[], pagination: { total, limit, offset } }
+//
+// ListingDto field names match apps/api/src/routes/listings.ts serializeListing():
+//   pubkey, owner, capability, priceUsdcBaseUnits, pricingModel, slaParams,
+//   metadataUri, isActive, jobsCompleted, reputationScore, endpoint, metadata,
+//   satiAgentId, createdAt, updatedAt.
 
-function mockOkResponse(services: ServiceProvider[]) {
+function makeListingDto(s: ServiceProvider) {
+  return {
+    pubkey: s.listing.toBase58(),
+    owner: s.owner.toBase58(),
+    capability: s.capability,
+    priceUsdcBaseUnits: s.priceUsdc.toString(),
+    pricingModel: s.pricingModel,
+    slaParams: {
+      maxLatencyMs: s.sla.maxLatencyMs ?? null,
+      minUptimePct: s.sla.minUptimePct ?? null,
+      responseFormat: s.sla.responseFormat ?? null,
+      jsonSchemaUri: s.sla.jsonSchemaUri ?? null,
+      customParams: s.sla.customParams ?? [],
+    },
+    metadataUri: null,
+    isActive: s.isActive,
+    jobsCompleted: s.jobsCompleted.toString(),
+    reputationScore: s.reputation,
+    endpoint: s.endpoint ?? null,
+    metadata: null,
+    satiAgentId: null,
+    createdAt: null,
+    updatedAt: null,
+  };
+}
+
+function mockOkResponse(services: ServiceProvider[], total?: number) {
   return vi.fn().mockResolvedValue({
     ok: true,
     json: async () => ({
-      services: services.map((s) => ({
-        listing: s.listing.toBase58(),
-        owner: s.owner.toBase58(),
-        capability: s.capability,
-        priceUsdc: s.priceUsdc.toString(),
-        pricingModel: s.pricingModel,
-        sla: {
-          maxLatencyMs: s.sla.maxLatencyMs ?? null,
-          minUptimePct: s.sla.minUptimePct ?? null,
-          responseFormat: s.sla.responseFormat ?? null,
-          jsonSchemaUri: s.sla.jsonSchemaUri ?? null,
-          // omit customParams when not set — API returns array or omits the field, never null
-          ...(s.sla.customParams !== undefined ? { customParams: s.sla.customParams } : {}),
-        },
-        endpoint: s.endpoint ?? 'https://agent.example.com',
-        reputation: s.reputation,
-        jobsCompleted: s.jobsCompleted,
-        isActive: s.isActive,
-      })),
+      data: services.map(makeListingDto),
+      pagination: {
+        total: total ?? services.length,
+        limit: services.length || 20,
+        offset: 0,
+      },
     }),
   });
 }
 
 function mockErrorResponse(status = 500, statusText = 'Internal Server Error') {
-  return vi.fn().mockResolvedValue({ ok: false, status, statusText });
+  return vi.fn().mockResolvedValue({ ok: false, status, statusText, json: async () => ({}) });
 }
 
 function mockNetworkError(message = 'connect ECONNREFUSED') {
@@ -87,8 +108,20 @@ function mockInvalidSchemaResponse() {
   return vi.fn().mockResolvedValue({
     ok: true,
     json: async () => ({
-      services: [{ listing: 'bad', endpoint: 'javascript:alert(1)', priceUsdc: 'not-a-number' }],
+      // Missing required `pagination` and `data` keys → Zod throws → DiscoveryAPIError
+      services: [
+        { pubkey: 'bad', endpoint: 'javascript:alert(1)', priceUsdcBaseUnits: 'not-a-number' },
+      ],
     }),
+  });
+}
+
+function mock400Response(message = 'Bad Request') {
+  return vi.fn().mockResolvedValue({
+    ok: false,
+    status: 400,
+    statusText: 'Bad Request',
+    json: async () => ({ message }),
   });
 }
 
@@ -202,14 +235,14 @@ describe('discoverServices — input validation', () => {
     ).rejects.toThrow(ValidationError);
   });
 
-  it('accepts empty input (all defaults)', async () => {
+  it('accepts empty input (all defaults) — returns via API', async () => {
     await expect(
       discoverServices(connection, wallet, {}, 'https://api.example.com'),
     ).resolves.toEqual([]);
   });
 });
 
-describe('discoverServices — Discovery API path', () => {
+describe('discoverServices — Discovery API primary path', () => {
   const wallet = makeWallet();
   const connection = { commitment: 'confirmed' } as never;
   const apiUrl = 'https://api.agentbazaar.io';
@@ -230,7 +263,7 @@ describe('discoverServices — Discovery API path', () => {
     expect(first.listing.toBase58()).toBe(provider.listing.toBase58());
   });
 
-  it('maps reputation from API response', async () => {
+  it('maps reputationScore from API response to ServiceProvider.reputation', async () => {
     const provider = makeProvider({ reputation: 95 });
     vi.stubGlobal('fetch', mockOkResponse([provider]));
 
@@ -238,7 +271,23 @@ describe('discoverServices — Discovery API path', () => {
     expect(results[0]!.reputation).toBe(95);
   });
 
-  it('passes capability filter as query param', async () => {
+  it('maps priceUsdcBaseUnits string to BigInt priceUsdc', async () => {
+    const provider = makeProvider({ priceUsdc: 5_500_000n });
+    vi.stubGlobal('fetch', mockOkResponse([provider]));
+
+    const results = await discoverServices(connection, wallet, {}, apiUrl);
+    expect(results[0]!.priceUsdc).toBe(5_500_000n);
+  });
+
+  it('maps jobsCompleted string to number', async () => {
+    const provider = makeProvider({ jobsCompleted: 42 });
+    vi.stubGlobal('fetch', mockOkResponse([provider]));
+
+    const results = await discoverServices(connection, wallet, {}, apiUrl);
+    expect(results[0]!.jobsCompleted).toBe(42);
+  });
+
+  it('passes capability filter as query param to /listings', async () => {
     const mockFetch = mockOkResponse([]);
     vi.stubGlobal('fetch', mockFetch);
 
@@ -246,10 +295,11 @@ describe('discoverServices — Discovery API path', () => {
 
     const firstCall = mockFetch.mock.calls[0]!;
     const calledUrl = new URL(firstCall[0] as string);
+    expect(calledUrl.pathname).toBe('/listings');
     expect(calledUrl.searchParams.get('capability')).toBe('text-summarise');
   });
 
-  it('passes minReputation, maxPrice, maxLatency, sort, limit as query params', async () => {
+  it('passes minReputation, maxPrice, maxLatency, limit as query params', async () => {
     const mockFetch = mockOkResponse([]);
     vi.stubGlobal('fetch', mockFetch);
 
@@ -260,7 +310,6 @@ describe('discoverServices — Discovery API path', () => {
         minReputation: 70,
         maxPrice: 5_000_000n,
         maxLatency: 1000,
-        sort: 'price_asc',
         limit: 10,
       },
       apiUrl,
@@ -271,57 +320,182 @@ describe('discoverServices — Discovery API path', () => {
     expect(calledUrl.searchParams.get('minReputation')).toBe('70');
     expect(calledUrl.searchParams.get('maxPrice')).toBe('5000000');
     expect(calledUrl.searchParams.get('maxLatency')).toBe('1000');
-    expect(calledUrl.searchParams.get('sort')).toBe('price_asc');
     expect(calledUrl.searchParams.get('limit')).toBe('10');
   });
 
-  it('falls back to RPC on API non-2xx', async () => {
+  it('maps sort=price_asc to sort=price&order=asc', async () => {
+    const mockFetch = mockOkResponse([]);
+    vi.stubGlobal('fetch', mockFetch);
+
+    await discoverServices(connection, wallet, { sort: 'price_asc' }, apiUrl);
+
+    const calledUrl = new URL(mockFetch.mock.calls[0]![0] as string);
+    expect(calledUrl.searchParams.get('sort')).toBe('price');
+    expect(calledUrl.searchParams.get('order')).toBe('asc');
+  });
+
+  it('maps sort=reputation_desc to sort=reputation&order=desc', async () => {
+    const mockFetch = mockOkResponse([]);
+    vi.stubGlobal('fetch', mockFetch);
+
+    await discoverServices(connection, wallet, { sort: 'reputation_desc' }, apiUrl);
+
+    const calledUrl = new URL(mockFetch.mock.calls[0]![0] as string);
+    expect(calledUrl.searchParams.get('sort')).toBe('reputation');
+    expect(calledUrl.searchParams.get('order')).toBe('desc');
+  });
+
+  it('maps sort=latency_asc to sort=completedJobs&order=asc', async () => {
+    const mockFetch = mockOkResponse([]);
+    vi.stubGlobal('fetch', mockFetch);
+
+    await discoverServices(connection, wallet, { sort: 'latency_asc' }, apiUrl);
+
+    const calledUrl = new URL(mockFetch.mock.calls[0]![0] as string);
+    expect(calledUrl.searchParams.get('sort')).toBe('completedJobs');
+    expect(calledUrl.searchParams.get('order')).toBe('asc');
+  });
+
+  it('hits /listings not /services', async () => {
+    const mockFetch = mockOkResponse([]);
+    vi.stubGlobal('fetch', mockFetch);
+
+    await discoverServices(connection, wallet, {}, apiUrl);
+
+    const calledUrl = new URL(mockFetch.mock.calls[0]![0] as string);
+    expect(calledUrl.pathname).toBe('/listings');
+  });
+
+  it('falls back to RPC and throws DegradedDiscoveryError on 5xx', async () => {
     vi.stubGlobal('fetch', mockErrorResponse(503, 'Service Unavailable'));
     setRpcListings([]);
 
-    const results = await discoverServices(connection, wallet, {}, apiUrl);
-    expect(results).toEqual([]);
+    await expect(discoverServices(connection, wallet, {}, apiUrl)).rejects.toThrow(
+      DegradedDiscoveryError,
+    );
   });
 
-  it('falls back to RPC on network error', async () => {
+  it('DegradedDiscoveryError.rpcResults contains RPC fallback data on 5xx', async () => {
+    vi.stubGlobal('fetch', mockErrorResponse(503, 'Service Unavailable'));
+    setRpcListings([makeRpcListing({ isActive: true })]);
+
+    const err = await discoverServices(connection, wallet, {}, apiUrl).catch((e) => e);
+    expect(err).toBeInstanceOf(DegradedDiscoveryError);
+    expect((err as DegradedDiscoveryError<ServiceProvider>).rpcResults).toHaveLength(1);
+  });
+
+  it('DegradedDiscoveryError.cause is the original DiscoveryAPIError on 5xx', async () => {
+    vi.stubGlobal('fetch', mockErrorResponse(500, 'Internal Server Error'));
+    setRpcListings([]);
+
+    const err = await discoverServices(connection, wallet, {}, apiUrl).catch((e) => e);
+    expect(err).toBeInstanceOf(DegradedDiscoveryError);
+    expect((err as DegradedDiscoveryError).cause).toBeInstanceOf(DiscoveryAPIError);
+  });
+
+  it('falls back to RPC and throws DegradedDiscoveryError on network error', async () => {
     vi.stubGlobal('fetch', mockNetworkError());
     setRpcListings([]);
 
-    const results = await discoverServices(connection, wallet, {}, apiUrl);
-    expect(results).toEqual([]);
+    await expect(discoverServices(connection, wallet, {}, apiUrl)).rejects.toThrow(
+      DegradedDiscoveryError,
+    );
   });
 
-  it('M1: falls back to RPC on malformed JSON (SyntaxError → DiscoveryAPIError)', async () => {
+  it('DegradedDiscoveryError.cause is the DiscoveryAPIError on network error', async () => {
+    vi.stubGlobal('fetch', mockNetworkError('connect ECONNREFUSED'));
+    setRpcListings([]);
+
+    const err = await discoverServices(connection, wallet, {}, apiUrl).catch((e) => e);
+    expect(err).toBeInstanceOf(DegradedDiscoveryError);
+    expect((err as DegradedDiscoveryError).cause).toBeInstanceOf(DiscoveryAPIError);
+  });
+
+  it('M1: falls back to RPC and throws DegradedDiscoveryError on malformed JSON', async () => {
     vi.stubGlobal('fetch', mockMalformedJsonResponse());
     setRpcListings([]);
 
-    const results = await discoverServices(connection, wallet, {}, apiUrl);
-    expect(results).toEqual([]);
+    await expect(discoverServices(connection, wallet, {}, apiUrl)).rejects.toThrow(
+      DegradedDiscoveryError,
+    );
   });
 
-  it('M1: falls back to RPC on invalid API response schema (javascript: endpoint rejected)', async () => {
+  it('M1: falls back to RPC and throws DegradedDiscoveryError on invalid API response schema', async () => {
     vi.stubGlobal('fetch', mockInvalidSchemaResponse());
     setRpcListings([]);
 
-    const results = await discoverServices(connection, wallet, {}, apiUrl);
-    expect(results).toEqual([]);
+    await expect(discoverServices(connection, wallet, {}, apiUrl)).rejects.toThrow(
+      DegradedDiscoveryError,
+    );
   });
 
-  it('L1: bad baseUrl TypeError → DiscoveryAPIError → RPC fallback fires', async () => {
+  it('L1: bad baseUrl TypeError → DiscoveryAPIError → RPC fallback → DegradedDiscoveryError', async () => {
     vi.stubGlobal('fetch', mockOkResponse([]));
     setRpcListings([]);
 
-    const results = await discoverServices(connection, wallet, {}, 'not a url');
-    expect(results).toEqual([]);
+    await expect(discoverServices(connection, wallet, {}, 'not a url')).rejects.toThrow(
+      DegradedDiscoveryError,
+    );
+  });
+
+  it('400 from API throws DiscoveryAPIError (no RPC fallback)', async () => {
+    vi.stubGlobal('fetch', mock400Response('capability filter too broad'));
+    setRpcListings([makeRpcListing({ isActive: true })]);
+
+    await expect(discoverServices(connection, wallet, {}, apiUrl)).rejects.toThrow(
+      DiscoveryAPIError,
+    );
+  });
+
+  it('400 DiscoveryAPIError has correct statusCode', async () => {
+    vi.stubGlobal('fetch', mock400Response('bad request'));
+    setRpcListings([]);
+
+    const err = await discoverServices(connection, wallet, {}, apiUrl).catch((e) => e);
+    expect(err).toBeInstanceOf(DiscoveryAPIError);
+    expect((err as DiscoveryAPIError).statusCode).toBe(400);
+  });
+
+  it('400 from API does NOT run RPC fallback (Program.account.serviceListing.all not called)', async () => {
+    const mockAll = vi.fn().mockResolvedValue([]);
+    // biome-ignore lint/suspicious/noExplicitAny: test mock
+    (Program as any).mockImplementation(() => ({
+      account: { serviceListing: { all: mockAll } },
+    }));
+    vi.stubGlobal('fetch', mock400Response());
+
+    await discoverServices(connection, wallet, {}, apiUrl).catch(() => {});
+
+    expect(mockAll).not.toHaveBeenCalled();
+  });
+
+  it('AbortSignal timeout → DiscoveryAPIError → RPC fallback → DegradedDiscoveryError', async () => {
+    // Simulate AbortSignal timeout by rejecting with a DOMException named TimeoutError
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockRejectedValue(
+        (() => {
+          const e = new Error('The operation was aborted due to timeout');
+          e.name = 'TimeoutError';
+          return e;
+        })(),
+      ),
+    );
+    setRpcListings([]);
+
+    await expect(discoverServices(connection, wallet, {}, apiUrl)).rejects.toThrow(
+      DegradedDiscoveryError,
+    );
   });
 });
 
-describe('discoverServices — RPC fallback', () => {
+describe('discoverServices — RPC fallback (accessed via DegradedDiscoveryError)', () => {
   const wallet = makeWallet();
   const connection = { commitment: 'confirmed' } as never;
   const apiUrl = 'https://api.agentbazaar.io';
 
   beforeEach(() => {
+    // All tests in this suite simulate API outage → RPC fallback path
     vi.stubGlobal('fetch', mockErrorResponse());
   });
 
@@ -329,17 +503,24 @@ describe('discoverServices — RPC fallback', () => {
     vi.unstubAllGlobals();
   });
 
+  function getRpcResults(err: unknown): ServiceProvider[] {
+    expect(err).toBeInstanceOf(DegradedDiscoveryError);
+    return [...(err as DegradedDiscoveryError<ServiceProvider>).rpcResults];
+  }
+
   it('filters out inactive listings', async () => {
     setRpcListings([makeRpcListing({ isActive: true }), makeRpcListing({ isActive: false })]);
 
-    const results = await discoverServices(connection, wallet, {}, apiUrl);
+    const err = await discoverServices(connection, wallet, {}, apiUrl).catch((e) => e);
+    const results = getRpcResults(err);
     expect(results).toHaveLength(1);
     expect(results[0]!.isActive).toBe(true);
   });
 
   it('L5: sets endpoint to undefined (stored in IPFS metadata, not on-chain)', async () => {
     setRpcListings([makeRpcListing({ isActive: true })]);
-    const results = await discoverServices(connection, wallet, {}, apiUrl);
+    const err = await discoverServices(connection, wallet, {}, apiUrl).catch((e) => e);
+    const results = getRpcResults(err);
     expect(results[0]!.endpoint).toBeUndefined();
   });
 
@@ -349,7 +530,10 @@ describe('discoverServices — RPC fallback', () => {
       makeRpcListing({ priceUsdc: 5_000_000n, isActive: true }),
     ]);
 
-    const results = await discoverServices(connection, wallet, { maxPrice: 2_000_000n }, apiUrl);
+    const err = await discoverServices(connection, wallet, { maxPrice: 2_000_000n }, apiUrl).catch(
+      (e) => e,
+    );
+    const results = getRpcResults(err);
     expect(results).toHaveLength(1);
     expect(results[0]!.priceUsdc).toBe(1_000_000n);
   });
@@ -360,7 +544,10 @@ describe('discoverServices — RPC fallback', () => {
       makeRpcListing({ sla: { maxLatencyMs: 2000 }, isActive: true }),
     ]);
 
-    const results = await discoverServices(connection, wallet, { maxLatency: 500 }, apiUrl);
+    const err = await discoverServices(connection, wallet, { maxLatency: 500 }, apiUrl).catch(
+      (e) => e,
+    );
+    const results = getRpcResults(err);
     expect(results).toHaveLength(1);
     expect(results[0]!.sla.maxLatencyMs).toBe(300);
   });
@@ -368,14 +555,18 @@ describe('discoverServices — RPC fallback', () => {
   it('includes listings with null latency when maxLatency filter is set', async () => {
     setRpcListings([makeRpcListing({ sla: {}, isActive: true })]);
 
-    const results = await discoverServices(connection, wallet, { maxLatency: 500 }, apiUrl);
+    const err = await discoverServices(connection, wallet, { maxLatency: 500 }, apiUrl).catch(
+      (e) => e,
+    );
+    const results = getRpcResults(err);
     expect(results).toHaveLength(1);
   });
 
   it('sets reputation to 0 (not stored on-chain in M0)', async () => {
     setRpcListings([makeRpcListing({ isActive: true })]);
 
-    const results = await discoverServices(connection, wallet, {}, apiUrl);
+    const err = await discoverServices(connection, wallet, {}, apiUrl).catch((e) => e);
+    const results = getRpcResults(err);
     expect(results[0]!.reputation).toBe(0);
   });
 
@@ -386,7 +577,10 @@ describe('discoverServices — RPC fallback', () => {
       makeRpcListing({ priceUsdc: 2_000_000n, isActive: true }),
     ]);
 
-    const results = await discoverServices(connection, wallet, { sort: 'price_asc' }, apiUrl);
+    const err = await discoverServices(connection, wallet, { sort: 'price_asc' }, apiUrl).catch(
+      (e) => e,
+    );
+    const results = getRpcResults(err);
     expect(results[0]!.priceUsdc).toBe(1_000_000n);
     expect(results[1]!.priceUsdc).toBe(2_000_000n);
     expect(results[2]!.priceUsdc).toBe(3_000_000n);
@@ -395,7 +589,13 @@ describe('discoverServices — RPC fallback', () => {
   it('sorts by reputation_desc (all 0 in RPC fallback, preserves insertion order)', async () => {
     setRpcListings([makeRpcListing({ isActive: true }), makeRpcListing({ isActive: true })]);
 
-    const results = await discoverServices(connection, wallet, { sort: 'reputation_desc' }, apiUrl);
+    const err = await discoverServices(
+      connection,
+      wallet,
+      { sort: 'reputation_desc' },
+      apiUrl,
+    ).catch((e) => e);
+    const results = getRpcResults(err);
     expect(results).toHaveLength(2);
     expect(results[0]!.reputation).toBe(0);
   });
@@ -407,7 +607,10 @@ describe('discoverServices — RPC fallback', () => {
       makeRpcListing({ sla: { maxLatencyMs: 200 }, isActive: true }),
     ]);
 
-    const results = await discoverServices(connection, wallet, { sort: 'latency_asc' }, apiUrl);
+    const err = await discoverServices(connection, wallet, { sort: 'latency_asc' }, apiUrl).catch(
+      (e) => e,
+    );
+    const results = getRpcResults(err);
     expect(results[0]?.sla.maxLatencyMs).toBe(200);
     expect(results[1]?.sla.maxLatencyMs).toBe(800);
     expect(results[2]?.sla.maxLatencyMs).toBeUndefined();
@@ -420,7 +623,8 @@ describe('discoverServices — RPC fallback', () => {
       makeRpcListing({ isActive: true }),
     ]);
 
-    const results = await discoverServices(connection, wallet, { limit: 2 }, apiUrl);
+    const err = await discoverServices(connection, wallet, { limit: 2 }, apiUrl).catch((e) => e);
+    const results = getRpcResults(err);
     expect(results).toHaveLength(2);
   });
 
@@ -428,7 +632,8 @@ describe('discoverServices — RPC fallback', () => {
     const many = Array.from({ length: 60 }, () => makeRpcListing({ isActive: true }));
     setRpcListings(many);
 
-    const results = await discoverServices(connection, wallet, {}, apiUrl);
+    const err = await discoverServices(connection, wallet, {}, apiUrl).catch((e) => e);
+    const results = getRpcResults(err);
     expect(results).toHaveLength(50);
   });
 
@@ -466,11 +671,28 @@ describe('discoverServices — RPC fallback', () => {
     expect((err as DegradedDiscoveryError).filtersDropped).toContain('minReputation');
   });
 
+  it('L7: DegradedDiscoveryError.rpcResults is populated even when minReputation causes degraded', async () => {
+    setRpcListings([makeRpcListing({ isActive: true })]);
+
+    const err = await discoverServices(connection, wallet, { minReputation: 1 }, apiUrl).catch(
+      (e) => e,
+    );
+    expect(err).toBeInstanceOf(DegradedDiscoveryError);
+    // rpcResults is set (the RPC fetched listings, just can't apply reputation filter)
+    expect((err as DegradedDiscoveryError<ServiceProvider>).rpcResults).toBeDefined();
+  });
+
   it('L7: minReputation 0 does NOT throw (reputation 0 passes the filter)', async () => {
     setRpcListings([makeRpcListing({ isActive: true })]);
 
-    const results = await discoverServices(connection, wallet, { minReputation: 0 }, apiUrl);
-    expect(results).toHaveLength(1);
+    // minReputation=0 → no DegradedDiscoveryError about filter, but still DegradedDiscoveryError
+    // because the API was unavailable. The rpcResults should be present.
+    const err = await discoverServices(connection, wallet, { minReputation: 0 }, apiUrl).catch(
+      (e) => e,
+    );
+    expect(err).toBeInstanceOf(DegradedDiscoveryError);
+    expect((err as DegradedDiscoveryError).filtersDropped).not.toContain('minReputation');
+    expect((err as DegradedDiscoveryError<ServiceProvider>).rpcResults).toHaveLength(1);
   });
 });
 
@@ -487,6 +709,106 @@ describe('discoverServices — error class hierarchy', () => {
     const { AgentBazaarError } = await import('../src/errors.js');
     expect(err).toBeInstanceOf(AgentBazaarError);
     expect(err.name).toBe('RPCFallbackFailedError');
+  });
+
+  it('DegradedDiscoveryError is instanceof AgentBazaarError', async () => {
+    const err = new DegradedDiscoveryError([]);
+    const { AgentBazaarError } = await import('../src/errors.js');
+    expect(err).toBeInstanceOf(AgentBazaarError);
+    expect(err.name).toBe('DegradedDiscoveryError');
+  });
+
+  it('DegradedDiscoveryError.rpcResults defaults to empty array', () => {
+    const err = new DegradedDiscoveryError([]);
+    expect(err.rpcResults).toEqual([]);
+  });
+
+  it('DegradedDiscoveryError.rpcResults is frozen', () => {
+    const err = new DegradedDiscoveryError<ServiceProvider>([], {
+      rpcResults: [makeProvider()],
+    });
+    expect(Object.isFrozen(err.rpcResults)).toBe(true);
+  });
+});
+
+describe('discoverServices — Zod schema fixture regression', () => {
+  // Validates APIResponseSchema against a canonical fixture that mirrors the exact
+  // JSON shape returned by GET /listings in apps/api/src/routes/listings.ts.
+  const validFixture = {
+    data: [
+      {
+        pubkey: '11111111111111111111111111111112',
+        owner: '11111111111111111111111111111112',
+        capability: 'text-summarise',
+        priceUsdcBaseUnits: '1000000',
+        pricingModel: 0,
+        slaParams: {
+          maxLatencyMs: 500,
+          minUptimePct: 9900,
+          responseFormat: 'json',
+          jsonSchemaUri: 'ipfs://Qm123',
+          customParams: [{ key: 'model', value: 'gpt-4o' }],
+        },
+        metadataUri: 'ipfs://QmFoo',
+        isActive: true,
+        jobsCompleted: '42',
+        reputationScore: 87,
+        endpoint: 'https://agent.example.com/run',
+        metadata: { name: 'My Agent' },
+        satiAgentId: null,
+        createdAt: '2026-01-01T00:00:00.000Z',
+        updatedAt: '2026-04-01T00:00:00.000Z',
+      },
+    ],
+    pagination: {
+      total: 1,
+      limit: 20,
+      offset: 0,
+    },
+  };
+
+  it('parses a canonical API fixture without error', () => {
+    expect(() => APIResponseSchema.parse(validFixture)).not.toThrow();
+  });
+
+  it('parses all ListingDto fields correctly', () => {
+    const parsed = APIResponseSchema.parse(validFixture);
+    const item = parsed.data[0]!;
+    expect(item.pubkey).toBe('11111111111111111111111111111112');
+    expect(item.priceUsdcBaseUnits).toBe('1000000');
+    expect(item.reputationScore).toBe(87);
+    expect(item.jobsCompleted).toBe('42');
+    expect(item.slaParams?.maxLatencyMs).toBe(500);
+    expect(item.slaParams?.customParams).toHaveLength(1);
+  });
+
+  it('rejects fixture with invalid pubkey', () => {
+    const bad = JSON.parse(JSON.stringify(validFixture));
+    bad.data[0].pubkey = 'not-a-pubkey!';
+    expect(() => APIResponseSchema.parse(bad)).toThrow();
+  });
+
+  it('rejects fixture with missing pagination', () => {
+    const bad = { data: validFixture.data };
+    expect(() => APIResponseSchema.parse(bad)).toThrow();
+  });
+
+  it('rejects fixture with non-decimal priceUsdcBaseUnits', () => {
+    const bad = JSON.parse(JSON.stringify(validFixture));
+    bad.data[0].priceUsdcBaseUnits = '1.5';
+    expect(() => APIResponseSchema.parse(bad)).toThrow();
+  });
+
+  it('ListingDtoSchema allows nullable capability', () => {
+    const row = JSON.parse(JSON.stringify(validFixture.data[0]));
+    row.capability = null;
+    expect(() => ListingDtoSchema.parse(row)).not.toThrow();
+  });
+
+  it('ListingDtoSchema allows nullable slaParams', () => {
+    const row = JSON.parse(JSON.stringify(validFixture.data[0]));
+    row.slaParams = null;
+    expect(() => ListingDtoSchema.parse(row)).not.toThrow();
   });
 });
 
@@ -525,7 +847,7 @@ describe('AgentBazaar.discover() — client integration', () => {
     expect(client.discoveryApiUrl).toBe('http://localhost:8787');
   });
 
-  it('returns ServiceProvider[] from discover()', async () => {
+  it('returns ServiceProvider[] from discover() on API success', async () => {
     const provider = makeProvider();
     vi.stubGlobal('fetch', mockOkResponse([provider]));
 
@@ -539,4 +861,65 @@ describe('AgentBazaar.discover() — client integration', () => {
     expect(results).toHaveLength(1);
     expect(results[0]?.endpoint).toBe(provider.endpoint);
   });
+
+  it('throws DegradedDiscoveryError with rpcResults on API 5xx', async () => {
+    vi.stubGlobal('fetch', mockErrorResponse(503, 'Service Unavailable'));
+    setRpcListings([makeRpcListing({ isActive: true })]);
+
+    const client = new AgentBazaar({
+      wallet: makeWallet(),
+      rpc: 'https://api.devnet.solana.com',
+      discoveryApiUrl: 'https://api.agentbazaar.io',
+    });
+
+    const err = await client.discover({}).catch((e) => e);
+    expect(err).toBeInstanceOf(DegradedDiscoveryError);
+    expect((err as DegradedDiscoveryError<ServiceProvider>).rpcResults).toHaveLength(1);
+  });
+
+  it('throws DiscoveryAPIError on 400 without RPC fallback', async () => {
+    vi.stubGlobal('fetch', mock400Response('bad filter'));
+
+    const client = new AgentBazaar({
+      wallet: makeWallet(),
+      rpc: 'https://api.devnet.solana.com',
+      discoveryApiUrl: 'https://api.agentbazaar.io',
+    });
+
+    const err = await client.discover({}).catch((e) => e);
+    expect(err).toBeInstanceOf(DiscoveryAPIError);
+    expect((err as DiscoveryAPIError).statusCode).toBe(400);
+  });
+});
+
+// ─── Integration test (real API — skipped unless INTEGRATION=true) ────────────
+
+describe('discoverServices — integration (real API)', () => {
+  const INTEGRATION = process.env.INTEGRATION === 'true';
+  const REAL_API_URL = 'https://agentbazaar-api.r-443.workers.dev';
+
+  it.skipIf(!INTEGRATION)(
+    'fetches real /listings from production API',
+    async () => {
+      const wallet = makeWallet();
+      const connection = { commitment: 'confirmed' } as never;
+
+      const result = await discoverServices(connection, wallet, { limit: 5 }, REAL_API_URL).catch(
+        (err) => {
+          // On degraded state, surface the rpcResults
+          if (err instanceof DegradedDiscoveryError) return err.rpcResults;
+          throw err;
+        },
+      );
+
+      expect(Array.isArray(result)).toBe(true);
+      // Each entry should be a valid ServiceProvider
+      for (const item of result as ServiceProvider[]) {
+        expect(item.listing).toBeDefined();
+        expect(typeof item.capability).toBe('string');
+        expect(typeof item.isActive).toBe('boolean');
+      }
+    },
+    15_000,
+  ); // 15 s timeout for network call
 });

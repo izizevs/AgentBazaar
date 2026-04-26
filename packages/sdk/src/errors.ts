@@ -73,16 +73,26 @@ export class RPCFallbackFailedError extends AgentBazaarError {}
  * Thrown when discover() degrades to the RPC fallback and one or more requested
  * filters cannot be applied (e.g., `minReputation` — reputation is not stored on-chain in M0).
  * `filtersDropped` lists the filter parameter names that were unavailable.
+ * `rpcResults` contains the best-effort RPC fallback results; callers may choose to use
+ * them despite the degraded state (e.g., show results with a "live data unavailable" banner).
  * UI should render "reputation filtering unavailable — results may include low-reputation agents".
  */
-export class DegradedDiscoveryError extends AgentBazaarError {
+export class DegradedDiscoveryError<TListing = unknown> extends AgentBazaarError {
   readonly filtersDropped: readonly string[];
-  constructor(filtersDropped: string[], options?: ErrorOptions) {
-    super(
-      `Discovery degraded to RPC fallback; filters unavailable: ${filtersDropped.join(', ')}`,
-      options,
-    );
+  /**
+   * Best-effort RPC fallback results. Present when the fallback succeeded but the
+   * Discovery API was unavailable. May be empty when `filtersDropped` includes filters
+   * that cannot be honoured via RPC (e.g., `minReputation`).
+   */
+  readonly rpcResults: readonly TListing[];
+  constructor(filtersDropped: string[], options?: ErrorOptions & { rpcResults?: TListing[] }) {
+    const msg =
+      filtersDropped.length > 0
+        ? `Discovery degraded to RPC fallback; filters unavailable: ${filtersDropped.join(', ')}`
+        : 'Discovery degraded to RPC fallback; Discovery API unavailable';
+    super(msg, options);
     this.filtersDropped = Object.freeze(filtersDropped);
+    this.rpcResults = Object.freeze(options?.rpcResults ?? []);
   }
 }
 

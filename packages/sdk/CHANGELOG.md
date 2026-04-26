@@ -5,6 +5,67 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [0.2.2] — 2026-04-26 (Task #56, M2-W4)
+
+### Changed
+
+- **`discover()` is now API-primary** (Task #56).
+  Previously `discover()` called `getProgramAccounts` directly on the user's RPC node (slow
+  beyond ~10k listings, load-bearing on the caller's connection). It now calls the Discovery
+  REST API (`GET /listings`) as the primary source, with RPC as a one-shot fallback.
+
+- **New default `apiUrl`**: `https://agentbazaar-api.r-443.workers.dev` (production CF Workers
+  endpoint). Override via `AgentBazaarConfig.discoveryApiUrl` or the `DISCOVERY_API_URL`
+  env var.
+
+- **`discover()` now throws `DegradedDiscoveryError` when the API is unavailable.**
+  Previously it silently returned RPC results. Now it always throws `DegradedDiscoveryError`
+  so callers know they are seeing degraded data. The RPC fallback results are attached as
+  `err.rpcResults: readonly ServiceProvider[]` so callers can choose to surface them with
+  appropriate UX ("live data unavailable — showing on-chain snapshot").
+
+- **4xx from API → `DiscoveryAPIError` (no fallback).** A 400/404/etc. is a client bug
+  (bad filter params), not a server outage — the SDK surfaces it immediately rather than
+  hiding it behind the RPC fallback.
+
+- **API response validated with Zod** before any consumer code runs. The schema
+  (`APIResponseSchema`, `ListingDtoSchema`) is exported for callers that want to validate
+  independently or write contract tests against the live API.
+
+- **Sort parameters mapped to API conventions**: SDK `'price_asc'` → `sort=price&order=asc`;
+  `'reputation_desc'` → `sort=reputation&order=desc`; `'latency_asc'` → `sort=completedJobs&order=asc`.
+
+### Added
+
+- `DegradedDiscoveryError<TListing>` gains a `rpcResults: readonly TListing[]` property.
+  Existing code that only catches the error and does not inspect `rpcResults` is unaffected.
+
+- `APIResponseSchema` and `ListingDtoSchema` exported from `@agentbazaar/sdk` (and from
+  `packages/sdk/src/discover.ts`) for contract testing.
+
+### Migration
+
+```ts
+// Before 0.2.2 — results silently came from RPC when API was down
+const results = await bazaar.discover({ capability: 'foo' });
+
+// After 0.2.2 — handle DegradedDiscoveryError to access RPC fallback results
+let results: ServiceProvider[];
+try {
+  results = await bazaar.discover({ capability: 'foo' });
+} catch (err) {
+  if (err instanceof DegradedDiscoveryError) {
+    // err.rpcResults contains best-effort on-chain data
+    results = [...err.rpcResults];
+    showBanner('Live data unavailable — showing on-chain snapshot');
+  } else {
+    throw err;
+  }
+}
+```
+
+---
+
 ## [0.2.1] — 2026-04-26
 
 ### Added

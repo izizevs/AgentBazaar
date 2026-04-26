@@ -1,5 +1,7 @@
 export type { AgentBazaarConfig, AnchorWallet } from './client.js';
 export { AgentBazaar } from './client.js';
+export type { ListingDto } from './discover.js';
+export { APIResponseSchema, ListingDtoSchema } from './discover.js';
 export {
   AgentBazaarError,
   DegradedDiscoveryError,
