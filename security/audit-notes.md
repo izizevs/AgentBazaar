@@ -5133,3 +5133,191 @@ No race window between validation and TCP connect. ✅
   Node ever changes hook contract (e.g., adds a fallback OS-resolver
   call), this defense degrades. Pin Node version range in
   `apps/indexer/package.json` engines field as part of M2 prep.
+
+---
+
+## PR #82 — `fix(sdk): use canonical ASSOCIATED_TOKEN_PROGRAM_ID from @solana/spl-token (Task #47, R1)`
+
+**Branch:** `feature/sdk-fix-ata-constant`
+**Reviewed:** 2026-04-26
+**Verdict:** APPROVED (post-hoc — already merged at `8a1556e`; flagged for record)
+
+### Scope
+
+1-line + import fix in `packages/sdk/src/escrow-utils.ts` swapping a
+typo'd hardcoded `ASSOCIATED_TOKEN_PROGRAM_ID`
+(`ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJe1bC8` — last 4 `1bC8`)
+introduced in PR #59 with the canonical pubkey imported directly from
+`@solana/spl-token` (`ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL` —
+last 4 `8knL`). Same treatment for `TOKEN_PROGRAM_ID`.
+
+Adds `@solana/spl-token ^0.4.9` as explicit `dependencies` +
+`peerDependencies` (was already transitively in lockfile).
+
+Adds regression `packages/sdk/tests/escrow-utils.test.ts` (4 cases)
+verifying `getAssociatedTokenAddress(mint, owner)` matches
+`getAssociatedTokenAddressSync` from `@solana/spl-token`.
+
+### Audit findings
+
+| Check | Verdict |
+|---|---|
+| Typo'd ATA program ID replaced with canonical | ✅ |
+| No remaining `ATokenGP*` literals in SDK / tests | ✅ (`grep -rn 'ATokenGP' packages/sdk/ tests/` → 0) |
+| Imported from upstream (`@solana/spl-token`) — single source of truth | ✅ |
+| Regression test in place | ✅ (4 cases) |
+| Trust boundary impact | None — typo'd constant produced a wrong (non-existent) ATA, which simply caused RPC `account not found` errors at pre-flight balance check. Not exploitable: an attacker cannot persuade the Anchor program to accept a wrong-derivation ATA because the on-chain `token::mint = usdc_mint, token::authority = buyer` constraints reject it. So the bug was strictly **functional**, not a security vector. |
+| Re-derivation matches `getAssociatedTokenAddressSync` deterministically | ✅ |
+| Lint / 180 SDK unit tests | ✅ (per PR body) |
+
+**Critical / High / Medium / Low:** none.
+
+**Required changes before merge:** none.
+
+### Notes for the external audit team (OtterSec / Neodyme)
+
+- Lesson learned: **never inline canonical SPL constants by string
+  literal**. PR #59 introduced the typo because someone copy-pasted
+  the address with a transcription error. M2 housekeeping: add a
+  semgrep / ripgrep CI rule banning hardcoded `ATokenGP*` /
+  `Tokenkeg*` / `So111111…` literals outside `packages/idl/`.
+- The fact that `pnpm typecheck` did not catch this (both addresses
+  are valid base58, both parse to a `PublicKey`) is by design — type
+  system has no semantic knowledge of program IDs. Rely on the
+  semgrep rule + the new `escrow-utils.test.ts` regression.
+
+---
+
+## PR #83 — `fix(escrow): correct devnet USDC mint constant + cluster-aware feature flag (Task #48, R2)`
+
+**Branch:** `feature/anchor-fix-escrow-usdc-mint`
+**Reviewed:** 2026-04-26
+**Verdict:** APPROVED
+
+### Scope
+
+Two-commit PR:
+
+1. **`989c628`** — anchor-eng: replace test-validator USDC mint
+   (`8VEVN5sJUzqN3ddkJV9gYMbLBnmAxUXsC5CDDU9WFwzE`) with Circle's
+   official devnet USDC (`4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU`)
+   in `programs/bazaar-escrow/src/lib.rs`. Simplifies cfg-feature
+   pattern from 3-way (`devnet` / `testing` / mainnet fallback) to
+   2-way (`mainnet` / not-mainnet). Anchor.toml gains a
+   `[[test.validator.account]]` entry that pre-loads a synthetic SPL
+   Mint at the canonical devnet USDC address for localnet tests.
+   Upgrade-in-place on devnet at existing program ID
+   `EhFptDs4mz6rt7HDmt8pB7ZogiqxUMVhpjB3NvToXxW2`. IDL refresh via
+   `pnpm sync` updates 5 `usdc_mint.address` occurrences in
+   `packages/idl/idl/bazaar_escrow.json` and the matching .ts.
+
+2. **`0924299`** — team-lead late add: drop `usdcMint:` from
+   `packages/sdk/src/hire.ts` `.accounts({ ... })` because the new IDL
+   exposes `usdc_mint` with an explicit `address` constant — Anchor
+   0.31's `ResolvedAccounts<>` type rejects the redundant field.
+   `usdcMint` remains a function parameter / variable, used for
+   `buyerTokenAccount` ATA derivation (line ~93) — that is correct
+   and necessary.
+
+### Bug context
+
+Smoke (Task #41) by qa-test-eng caught that PR #76 (Task #38) baked
+the wrong mint constraint into the deployed bazaar-escrow program +
+IDL. On devnet, account `8VEVN5sJUzqN3ddkJV9gYMbLBnmAxUXsC5CDDU9WFwzE`
+does not exist, so `create_escrow`'s `#[account(address = USDC_MINT)]`
+constraint dereferenced a non-existent account and the RPC simulation
+returned an account-not-found error. **Pure functional bug, not
+exploitable** — wrong constraint just means *all* escrows on devnet
+fail. There is no path where an attacker could substitute their own
+mint, because Anchor's `address = ...` constraint enforces equality
+strictly. Trust boundary intact at all times.
+
+### Audit checklist
+
+| # | Check | Result |
+|---|---|---|
+| 1 | Devnet USDC address in IDL = `4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU` | ✅ all 5 occurrences in `bazaar_escrow.json` + `.ts` |
+| 2 | Mainnet USDC address spelled correctly = `EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v` | ✅ matches Circle's published mainnet mint |
+| 3 | `#[cfg(feature = "mainnet")]` + `#[cfg(not(feature = "mainnet"))]` covers all cases | ✅ no fall-through possible — exhaustive, compile-time determined |
+| 4 | `Cargo.toml` declares the `mainnet` feature | ✅ `mainnet = []`, `default = []` (correct) |
+| 5 | No env-var / runtime resolution for USDC_MINT | ✅ pure compile-time `pubkey!()` constant |
+| 6 | All 4 escrow Accounts structs have `#[account(address = USDC_MINT)]` constraint on `usdc_mint` field | ✅ verified at `lib.rs:440, 483, 522, 570` |
+| 7 | Vault PDA still program-owned, no admin key | ✅ `seeds = [b"vault", escrow.key().as_ref()]`, `token::authority = vault` |
+| 8 | Synthetic mint fixture is well-formed SPL Mint | ✅ decoded: decimals=6, supply=0, mint_authority matches `test-mint-authority.json` keypair (`2iM2pV81vYaXiyt4ozZKAX4Tq2EwKCsqyiP7a7YX3ao8`), freeze_authority=None, owner=`TokenkegQ…`, initialized=true |
+| 9 | `programs/deploy-receipts.md` records upgrade-in-place tx | ✅ `5z11yrKQ8kGhJaFGtdKLmBZQ1tVB7uyEWhL2TF5AeHBjS3KZC1s7KsgfSQYGvqJNVwAqE2NS1JGMy4ErqCzMFgtu` at slot 458162475 |
+| 10 | Program ID unchanged across upgrade (`EhFptDs4mz6rt7HDmt8pB7ZogiqxUMVhpjB3NvToXxW2`) | ✅ `declare_id!` in `lib.rs:9` matches existing devnet PID |
+| 11 | Regression test asserts wrong mint is rejected with `ConstraintAddress` | ✅ `programs/tests/bazaar-escrow.ts:261` exercises `create_escrow` with a generated `badMintKp`, expects `/ConstraintAddress/` |
+| 12 | `hire.ts` no longer passes `usdcMint:` to `.accounts({ })` | ✅ commit `0924299` removes the field |
+| 13 | Other escrow methods (deliver / confirm / dispute / claimTimeout) — no `usdcMint:` in `.accounts({ })` | ✅ all 4 already construct `accts = { ... } as any` and only pass token-account derivations; no breakage |
+| 14 | `usdcMint` still flows to ATA derivation in SDK methods | ✅ all 5 SDK methods call `getAssociatedTokenAddress(usdcMint, owner)` |
+| 15 | Squads multisig upgrade authority preserved across in-place upgrade | n/a for devnet — but flag below for mainnet day |
+| 16 | Trust boundary: attacker cannot substitute alternate mint post-fix | ✅ `address = USDC_MINT` enforces equality at runtime via Anchor |
+| 17 | Regression scope: pre-fix orphaned escrows | ✅ none — devnet smoke caught the bug before any successful escrow could land (literally impossible to create one with wrong-mint program) |
+
+### Findings
+
+- **Critical / High / Medium:** none.
+
+- **Low:**
+  - **L1.** When the team produces the mainnet release artifact,
+    please verify that `cargo build-sbf --features mainnet` is the
+    actual command run by the deploy script (PR mentions it as the
+    invocation). A regression where someone forgets `--features
+    mainnet` and ships the devnet binary to mainnet would silently
+    bind to a non-existent mint on mainnet (Circle devnet USDC does
+    not exist on mainnet, so all escrows would fail — same shape of
+    bug as this PR fixes). Recommend the mainnet-deploy CI job
+    include a post-build assertion: `solana program dump <PID>
+    /tmp/bin && grep -F EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v
+    /tmp/bin`. Track as M2 follow-up.
+  - **L2.** Anchor 0.31's IDL generator embeds the constant address
+    into the IDL JSON. Downstream consumers (SDK, dashboard,
+    indexer) that build against the devnet IDL will compile-bind to
+    `4zMMC9…`. If the published `@agentbazaar/sdk` ever ships a
+    devnet IDL but is consumed against a mainnet RPC, every
+    `create_escrow` will fail at simulation. Mitigation: at
+    `npm publish` time, ship two IDLs (`bazaar_escrow.devnet.json`
+    + `bazaar_escrow.mainnet.json`) and let the SDK select via
+    `cluster` parameter. Track in same M2 cluster-detection
+    follow-up flagged in PR #77 L2 and PR #80 L4.
+
+### Test plan execution
+
+- ✅ IDL diff verified: 4 contexts had address `8VEVN5…` → `4zMMC9…`
+  (already had address constraint); the 5th (`CreateEscrow`) had
+  only `docs:` previously and now correctly has `address:` + the new
+  emit_cpi event-authority/program account additions. Net effect: IDL
+  is now in sync with the on-chain `#[account(address = USDC_MINT)]`
+  constraint that's been on the program since PR #51.
+- ✅ Mint fixture decoded byte-for-byte: matches USDC shape,
+  authority deterministic.
+- ✅ Regression test `rejects create_escrow with wrong USDC mint
+  (ConstraintAddress)` is the canonical guard against future
+  mint-mismatch regressions.
+- ✅ Commit `0924299` SDK fix is the minimum surgical change required
+  by the new IDL — no other escrow methods needed updates because
+  they already use `as any` casts and don't pass `usdcMint:`.
+
+**Required changes before merge:** none.
+
+### Notes for the external audit team (OtterSec / Neodyme)
+
+- The `address = USDC_MINT` constraint pattern is the M1-tail closure
+  of H1 (originally raised in PR #51 audit notes). Mainnet build
+  must be produced with `--features mainnet`; verify in deploy CI
+  before mainnet day (L1 above).
+- Synthetic SPL Mint fixtures pre-loaded via `[[test.validator.account]]`
+  are now part of the test stack. The fixture authority keypair
+  (`tests/fixtures/test-mint-authority.json`) is a public test secret
+  — never use it for any account that holds value. It exists only to
+  give the local validator a controllable mint authority for
+  `mint_to` during tests.
+- PR #76 / PR #51 trail: PR #51 introduced the per-cluster
+  `USDC_MINT` constraint (audit-approved at the time). PR #76 added a
+  `testing` cargo feature with the wrong mint hardcoded — the audit
+  for PR #76 missed that the test mint differed from devnet USDC,
+  because at the time the IDL had only `docs:` (no `address`) for
+  `CreateEscrow.usdcMint` and the symptom only surfaced at smoke. PR
+  #83 closes the loop. Add a CI assertion (mentioned above as L1) so
+  this class of cluster-mint mismatch can never silently ship again.
+
