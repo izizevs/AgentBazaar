@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { app } from '../src/app.js';
 import { getSql } from '../src/db/client.js';
 
-const REGISTRY_PROGRAM_ID = 'GJRgCCqkYvAezidpdd3i4p4kRRfJnM1EfGfgqYgchQqd';
+const REGISTRY_PROGRAM_ID = 'ADWoSmfUWLLRGMWZ61xuAMPhDgG77ziqAC5MA9voqLn3';
 const TEST_SECRET = 'Bearer test-webhook-secret-replay';
 
 const dbUrl = process.env.DATABASE_URL;

@@ -13,8 +13,10 @@ import { logger } from '../logger.js';
 import { verifyHeliusAuth } from './auth.js';
 import { HeliusWebhookPayloadSchema } from './types.js';
 
-const BAZAAR_REGISTRY_PROGRAM_ID = 'GJRgCCqkYvAezidpdd3i4p4kRRfJnM1EfGfgqYgchQqd';
-const BAZAAR_ESCROW_PROGRAM_ID = 'EhFptDs4mz6rt7HDmt8pB7ZogiqxUMVhpjB3NvToXxW2';
+const BAZAAR_REGISTRY_PROGRAM_ID =
+  process.env.BAZAAR_REGISTRY_PROGRAM_ID ?? 'ADWoSmfUWLLRGMWZ61xuAMPhDgG77ziqAC5MA9voqLn3';
+const BAZAAR_ESCROW_PROGRAM_ID =
+  process.env.BAZAAR_ESCROW_PROGRAM_ID ?? 'EhFptDs4mz6rt7HDmt8pB7ZogiqxUMVhpjB3NvToXxW2';
 
 export async function handleHeliusWebhook(c: Context): Promise<Response> {
   if (!verifyHeliusAuth(c)) {

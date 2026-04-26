@@ -23,21 +23,24 @@ export const HeliusInstructionSchema = z.object({
 });
 
 export const HeliusEventSchema = z.object({
+  // Always-present fields per Helius enhanced transactions API
+  signature: z.string(),
+  slot: z.number(),
+  timestamp: z.number(),
   description: z.string(),
   type: z.string(),
   source: z.string(),
   fee: z.number(),
   feePayer: z.string(),
-  signature: z.string(),
-  slot: z.number(),
-  timestamp: z.number(),
+  accountData: z.array(HeliusAccountDataSchema),
+  instructions: z.array(HeliusInstructionSchema),
+  // null on success, error object on failure — always present
+  transactionError: z.unknown().nullable(),
+  // Optional: absent when empty / not applicable
   nativeTransfers: z.array(z.unknown()).optional(),
   tokenTransfers: z.array(z.unknown()).optional(),
-  accountData: z.array(HeliusAccountDataSchema),
-  transactionError: z.unknown().nullable().optional(),
-  instructions: z.array(HeliusInstructionSchema),
-  // events field is present for enhanced webhooks
   events: z.record(z.unknown()).optional(),
+  lighthouseData: z.unknown().optional(),
 });
 
 // A Helius webhook payload is an array of enhanced transaction objects.

@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { app } from '../src/app.js';
 
-const REGISTRY_PROGRAM_ID = 'GJRgCCqkYvAezidpdd3i4p4kRRfJnM1EfGfgqYgchQqd';
+const REGISTRY_PROGRAM_ID = 'ADWoSmfUWLLRGMWZ61xuAMPhDgG77ziqAC5MA9voqLn3';
 const OTHER_PROGRAM_ID = '11111111111111111111111111111111';
 const TEST_SECRET = 'Bearer test-webhook-secret-abc123';
 const RUN = `wh-test-${Date.now()}`;

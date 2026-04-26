@@ -7,7 +7,7 @@ import { getSql } from '../src/db/client.js';
 const dbUrl = process.env.DATABASE_URL;
 
 const TEST_SECRET = 'Bearer event-handler-test-secret-abc123456';
-const REGISTRY_PROGRAM_ID = 'GJRgCCqkYvAezidpdd3i4p4kRRfJnM1EfGfgqYgchQqd';
+const REGISTRY_PROGRAM_ID = 'ADWoSmfUWLLRGMWZ61xuAMPhDgG77ziqAC5MA9voqLn3';
 
 // A valid BorshEventCoder-encoded ServiceListingCreated event is hard to
 // fabricate without the Anchor toolchain, so we test the handler's routing
