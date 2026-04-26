@@ -11,13 +11,11 @@ crate-type = ["cdylib", "lib"]
 name = "bazaar_escrow"
 
 [features]
-# testing = [] is included in default so `anchor test` (which runs `anchor build`)
-# compiles with the test USDC mint constant. Production builds use
-# `anchor build --no-default-features --features devnet` (devnet) or
-# `anchor build --no-default-features` (mainnet).
-default = ["testing"]
-devnet = []
-testing = []
+# Default (no flags) → devnet USDC mint 4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU.
+# Local anchor tests load the mint via [[test.validator.account]] in Anchor.toml.
+# Mainnet: `cargo build-sbf --features mainnet` → EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v
+default = []
+mainnet = []
 cpi = ["no-entrypoint"]
 no-entrypoint = []
 no-idl = []

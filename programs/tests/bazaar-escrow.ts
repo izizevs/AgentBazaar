@@ -220,23 +220,16 @@ describe('bazaar-escrow', () => {
   before(async () => {
     escrowEventAuthority = eventAuthorityPda(escrowProgram.programId);
     registryEventAuthority = eventAuthorityPda(registryProgram.programId);
-    mintAuthority = Keypair.generate();
-    await fund(connection, mintAuthority.publicKey, 5);
-    // Load the deterministic test USDC mint keypair from fixtures so its address
-    // matches the USDC_MINT constant compiled with the `testing` cargo feature.
-    const mintKp = Keypair.fromSecretKey(
+    // Load the deterministic test mint authority from fixtures.
+    // The mint itself (4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU) is pre-loaded
+    // by Anchor.toml [[test.validator.account]] at the canonical devnet USDC address.
+    mintAuthority = Keypair.fromSecretKey(
       Uint8Array.from(
-        JSON.parse(readFileSync('./tests/fixtures/test-usdc-mint.json', 'utf8')) as number[],
+        JSON.parse(readFileSync('./tests/fixtures/test-mint-authority.json', 'utf8')) as number[],
       ),
     );
-    usdcMint = await createMint(
-      connection,
-      mintAuthority,
-      mintAuthority.publicKey,
-      null,
-      USDC_DECIMALS,
-      mintKp,
-    );
+    await fund(connection, mintAuthority.publicKey, 5);
+    usdcMint = new PublicKey('4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU');
   });
 
   // -------------------------------------------------------------------------

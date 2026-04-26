@@ -30,5 +30,12 @@ members = ["bazaar-registry", "bazaar-escrow", "bazaar-sla", "bazaar-evaluator"]
 [test]
 startup_wait = 15000
 
+# Inject the Circle devnet USDC mint at its canonical address so local tests
+# compile against the same USDC_MINT constant as the deployed devnet program.
+# The fixture is a synthetic SPL Mint account with mint_authority = test-mint-authority.json.
+[[test.validator.account]]
+address = "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU"
+filename = "tests/fixtures/devnet-usdc-mint.json"
+
 [scripts]
 test = "node_modules/.bin/ts-mocha -p ./tsconfig.json -t 60000 tests/**/*.ts"

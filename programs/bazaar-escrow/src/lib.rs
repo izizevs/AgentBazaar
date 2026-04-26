@@ -7,15 +7,15 @@ use crate::program::BazaarEscrow;
 
 declare_id!("EhFptDs4mz6rt7HDmt8pB7ZogiqxUMVhpjB3NvToXxW2");
 
-// Per-cluster USDC mint binding — closes H1 audit finding from PR #51.
-// Production builds: `anchor build --no-default-features --features devnet` or
-// `anchor build --no-default-features` (mainnet). Tests use `default = ["testing"]`.
-#[cfg(feature = "devnet")]
-pub const USDC_MINT: Pubkey = pubkey!("4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU");
-#[cfg(feature = "testing")]
-pub const USDC_MINT: Pubkey = pubkey!("8VEVN5sJUzqN3ddkJV9gYMbLBnmAxUXsC5CDDU9WFwzE");
-#[cfg(not(any(feature = "devnet", feature = "testing")))]
+// Per-cluster USDC mint binding.
+// Devnet / localnet (default): Circle devnet USDC — 4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU
+// Mainnet: `cargo build-sbf --features mainnet` — EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v
+// Local tests use the test-validator account injection in Anchor.toml
+// (tests/fixtures/devnet-usdc-mint.json pre-loads the mint at the devnet address).
+#[cfg(feature = "mainnet")]
 pub const USDC_MINT: Pubkey = pubkey!("EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v");
+#[cfg(not(feature = "mainnet"))]
+pub const USDC_MINT: Pubkey = pubkey!("4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU");
 
 pub const MAX_RESULT_URI: usize = 128;
 pub const MAX_REASON: usize = 128;

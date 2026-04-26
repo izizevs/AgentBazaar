@@ -98,8 +98,45 @@ export type BazaarEscrow = {
           "writable": true
         },
         {
+          "name": "usdcMint",
+          "address": "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU"
+        },
+        {
           "name": "tokenProgram",
           "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        },
+        {
+          "name": "eventAuthority",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  95,
+                  95,
+                  101,
+                  118,
+                  101,
+                  110,
+                  116,
+                  95,
+                  97,
+                  117,
+                  116,
+                  104,
+                  111,
+                  114,
+                  105,
+                  116,
+                  121
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "program",
+          "address": "EhFptDs4mz6rt7HDmt8pB7ZogiqxUMVhpjB3NvToXxW2"
         }
       ],
       "args": []
@@ -193,6 +230,10 @@ export type BazaarEscrow = {
           "writable": true
         },
         {
+          "name": "usdcMint",
+          "address": "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU"
+        },
+        {
           "name": "listing",
           "writable": true
         },
@@ -229,6 +270,39 @@ export type BazaarEscrow = {
         {
           "name": "tokenProgram",
           "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        },
+        {
+          "name": "eventAuthority",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  95,
+                  95,
+                  101,
+                  118,
+                  101,
+                  110,
+                  116,
+                  95,
+                  97,
+                  117,
+                  116,
+                  104,
+                  111,
+                  114,
+                  105,
+                  116,
+                  121
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "program",
+          "address": "EhFptDs4mz6rt7HDmt8pB7ZogiqxUMVhpjB3NvToXxW2"
         }
       ],
       "args": [
@@ -327,10 +401,7 @@ export type BazaarEscrow = {
         },
         {
           "name": "usdcMint",
-          "docs": [
-            "and buyer_token_account. H1 per-cluster address check is M1-tail work",
-            "(see docs/decisions/0002-m1-dispute-stub.md for why devnet omits it)."
-          ]
+          "address": "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU"
         },
         {
           "name": "tokenProgram",
@@ -343,6 +414,39 @@ export type BazaarEscrow = {
         {
           "name": "rent",
           "address": "SysvarRent111111111111111111111111111111111"
+        },
+        {
+          "name": "eventAuthority",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  95,
+                  95,
+                  101,
+                  118,
+                  101,
+                  110,
+                  116,
+                  95,
+                  97,
+                  117,
+                  116,
+                  104,
+                  111,
+                  114,
+                  105,
+                  116,
+                  121
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "program",
+          "address": "EhFptDs4mz6rt7HDmt8pB7ZogiqxUMVhpjB3NvToXxW2"
         }
       ],
       "args": [
@@ -457,8 +561,45 @@ export type BazaarEscrow = {
           "writable": true
         },
         {
+          "name": "usdcMint",
+          "address": "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU"
+        },
+        {
           "name": "tokenProgram",
           "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        },
+        {
+          "name": "eventAuthority",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  95,
+                  95,
+                  101,
+                  118,
+                  101,
+                  110,
+                  116,
+                  95,
+                  97,
+                  117,
+                  116,
+                  104,
+                  111,
+                  114,
+                  105,
+                  116,
+                  121
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "program",
+          "address": "EhFptDs4mz6rt7HDmt8pB7ZogiqxUMVhpjB3NvToXxW2"
         }
       ],
       "args": [
@@ -556,8 +697,45 @@ export type BazaarEscrow = {
           "writable": true
         },
         {
+          "name": "usdcMint",
+          "address": "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU"
+        },
+        {
           "name": "tokenProgram",
           "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        },
+        {
+          "name": "eventAuthority",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  95,
+                  95,
+                  101,
+                  118,
+                  101,
+                  110,
+                  116,
+                  95,
+                  97,
+                  117,
+                  116,
+                  104,
+                  111,
+                  114,
+                  105,
+                  116,
+                  121
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "program",
+          "address": "EhFptDs4mz6rt7HDmt8pB7ZogiqxUMVhpjB3NvToXxW2"
         }
       ],
       "args": [

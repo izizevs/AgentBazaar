@@ -93,7 +93,6 @@ export async function hireAgent(
       buyer: wallet.publicKey,
       listing: listingPubkey,
       buyerTokenAccount,
-      usdcMint,
     })
     .instruction();
 
