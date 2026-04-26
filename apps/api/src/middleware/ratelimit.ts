@@ -25,8 +25,7 @@ function getKeyAndLimit(c: Context): { key: string; limit: number } {
   if (agentPubkey) {
     return { key: `agent:${agentPubkey}`, limit: 1000 };
   }
-  const ip =
-    c.req.header('cf-connecting-ip') ?? c.req.header('x-forwarded-for') ?? 'unknown';
+  const ip = c.req.header('cf-connecting-ip') ?? c.req.header('x-forwarded-for') ?? 'unknown';
   return { key: `ip:${ip}`, limit: 100 };
 }
 

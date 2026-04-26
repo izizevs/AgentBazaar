@@ -5386,6 +5386,104 @@ No admin-key, vault-PDA, or upgrade-authority surface is touched.
 3. Extend `mapProgramCode` lookup table to cover all 11 escrow error codes (I3) — complete the typed-exception surface.
 4. Repo-wide audit of vitest configs for similar silent-skip gaps (I4) — meta-fix.
 
+---
+
+## PR #90 — feature/api-discovery-cf-workers — 2026-04-26
+
+**Verdict:** APPROVED (with non-blocking follow-ups for M3)
+
+**Scope of review:**
+- `apps/api/src/index.ts` (+57) — Hono app entrypoint, global middleware, 404/onError
+- `apps/api/src/middleware/cors.ts` (+9) — `origin: '*'`, GET+OPTIONS, no credentials
+- `apps/api/src/middleware/ratelimit.ts` (+54) — lazy-init `hono-rate-limiter`, IP/agent tiers
+- `apps/api/src/middleware/validate.ts` (+41) — Zod via `@hono/zod-validator`, structured 400
+- `apps/api/src/routes/listings.ts` (+122) — list + detail; pagination, ILIKE, count
+- `apps/api/src/routes/escrows.ts` (+46) — single detail by pubkey
+- `apps/api/src/routes/agents.ts` (+50) — reputation snapshot, zero-state fallback
+- `apps/api/src/db/client.ts` (+14) — neon-http driver, per-request factory
+- `apps/api/src/db/schema.ts` (+115) — standalone Drizzle schema (TODO: extract to packages/db-schema)
+- `apps/api/wrangler.toml` (+18) — no secrets in file; APP_VERSION only
+- `apps/api/.dev.vars.example` (+5) — DATABASE_URL placeholder; `.dev.vars` in `.gitignore` ✓
+
+This is the **first publicly internet-exposed AgentBazaar service** (deployed at
+`https://agentbazaar-api.r-443.workers.dev`). Threat model expands from
+trusted-internal to anonymous-traffic. Read-only — no fund flow, no signing,
+no `programs/` write path. Trust-boundary surface: DB scan budget,
+rate-limit memory, error-message hygiene.
+
+### Trust-boundary review
+
+Worst-case failure modes for this PR:
+- **DB DOS** — slow query (ILIKE Seq Scan, large OFFSET) drains the Neon HTTP pool; SDK / dashboard reads stall. No fund-loss vector — escrows are settled on-chain.
+- **CF budget drain** — anonymous attacker burns the 100k req/day free tier. Service degrades; on-chain settlement unaffected.
+- **Rate-limit memory exhaustion** — per-isolate `MemoryStore` keyed on caller-supplied `X-Agent-Pubkey` value (no validation). Attacker rotates random keys → unbounded map growth → CF isolate OOM. Recoverable (CF spawns fresh isolates) but disrupts service.
+- **No reflected XSS** — Zod `issues` strip the offending input value (only `path` + `message` exposed). Confirmed by code reading.
+- **No SQLi** — all WHERE/ORDER BY/LIMIT/OFFSET use Drizzle helpers (`eq`, `ilike`, `and`, `asc`, `desc`); no raw `sql\`\`` template tags interpolating request data; the only `sql\`0\`` literals are static schema defaults.
+
+No `programs/`, escrow vault PDA, admin-key, or upgrade-authority surface is touched.
+
+### Findings
+
+| Sev | ID | File:Line | Issue | Status |
+|-----|----|-----------|-------|--------|
+| Medium | M1 | `apps/api/src/middleware/ratelimit.ts:24-31` | **`X-Agent-Pubkey` header is not validated as base58 before keying the rate-limit map.** An attacker can spam `X-Agent-Pubkey: <random N bytes>` per request → unique map keys per request → unbounded growth in the per-isolate `MemoryStore` within the 60s window. At 1k req/s, ~60k entries/window/isolate before cleanup. Combined with the `agent` tier giving a higher 1000 req/min budget, this is also a **rate-limit bypass amplifier**: an attacker rotates pubkeys to get effectively unlimited budget. **Fix:** apply the same `^[1-9A-HJ-NP-Za-km-z]{32,44}$` regex used in route schemas to the header value inside `getKeyAndLimit`; on mismatch, fall back to `cf-connecting-ip` keying (and the lower 100/min limit). | NEEDS-FIX-M3 |
+| Medium | M2 | `apps/api/src/db/schema.ts:1-9` (vs `apps/indexer/src/db/schema.ts`) | **Schema duplicated between `apps/api/` and `apps/indexer/`.** Comments are different but the pgTable definitions are functionally aligned today. Drift risk: indexer adds a column the API doesn't know about (silently dropped in serializer), or the API queries a column the indexer renames. Operational, not security per se, but a divergence that adds e.g. a column with PII or sensitive metadata could leak through the read API without a security-auditor seeing the change. **Fix:** extract to `packages/db-schema/` and import from both apps. The author noted this in code comments and intends to track it. | FOLLOW-UP-M3 |
+| Low | L1 | `apps/api/src/routes/listings.ts:21` | **`offset` has no upper bound** (`z.coerce.number().int().min(0).default(0)`). With `offset=999999999`, Postgres still has to scan-and-discard rows for the count query (`select count(*)::int`). Combined with `ilike(capability, '%term%')` (left-anchored wildcard, defeats any non-trigram index), an attacker can issue intentionally slow scans. The 100 req/min IP limit caps the damage but a single legitimate-looking burst can pin the Neon HTTP pool. **Fix:** clamp `offset` to e.g. `.max(10000)` (cursor-based pagination is the proper M3 solution); add a Postgres `pg_trgm` GIN index on `service_listings.capability` if substring search is the canonical UX. | FOLLOW-UP-M3 |
+| Low | L2 | `apps/api/src/middleware/ratelimit.ts:15-31` | **Per-isolate `MemoryStore` is best-effort only.** CF Workers spawn one isolate per (PoP × eyeball-shape); an attacker spreading load across PoPs gets an effectively fresh budget per region. Documented in code comments. **Acceptable for MVP read-only API** (the surface protects only the DB and CF budget, both restorable). For mainnet / paid traffic: migrate to CF native Rate Limiting binding (rules-engine or Workers Rate Limiting API) or Upstash Redis-backed store. | FOLLOW-UP-M3 |
+| Low | L3 | `apps/api/src/middleware/ratelimit.ts:28-30` | **`x-forwarded-for` fallback is trustable only in CF.** When a request hits CF Workers directly, `cf-connecting-ip` is set by the edge and is the canonical client IP; `x-forwarded-for` is not trustable in general but is in this code path because it'd be set by CF on its own request. The `?? 'unknown'` final fallback collapses ALL non-CF traffic into a single key — not a vulnerability today (CF Workers always sets `cf-connecting-ip`), but if the deployment topology ever changes (e.g., serving via a CF-Pages-Functions binding from another origin), the rate limit collapses to a single shared bucket. **Fix:** drop the `x-forwarded-for` fallback (or replace with explicit assertion that runtime is CF Workers); if `cf-connecting-ip` is missing, return 500 rather than silently sharing a single rate-limit bucket. | NON-BLOCKING |
+| Low | L4 | `apps/api/src/routes/listings.ts:66` | **`ilike(capability, \`%${capability}%\`)` is parametrized correctly** by Drizzle (no SQL injection — confirmed by reading the generated SQL via Drizzle's parameter array shape). However, **the user-supplied `capability` value can contain `%` and `_` LIKE wildcards** which are passed through unescaped. This means a query like `capability=%` matches every row (defeats filtering — but the `LIMIT 100` cap mitigates) and `capability=_____________________________________` (33 underscores) matches every 33+ char capability. Not a vuln, but a query-semantics gotcha. **Fix:** escape `%` and `_` before interpolation (`capability.replace(/[\\%_]/g, '\\$&')`), or switch to a trigram operator. | NON-BLOCKING |
+| Info | I1 | `apps/api/src/index.ts:51-54` | Top-level `app.onError` returns generic `internal_error` with a static message — **no stack trace, no DB error details leak**. `console.error('[api] unhandled error', err)` writes to CF logs (which only the team sees). Verified: no `err.message` echoed in the response body. | NOTE |
+| Info | I2 | `apps/api/src/middleware/validate.ts:14-17,32-35` | Zod `issues` map exposes only `path` and `message` — **NOT `i.input`, NOT `i.received`**, so the offending request value (e.g., `<script>alert(1)</script>` injected as a pubkey path param) is **not echoed back**. No reflected-XSS-for-downstream-consumer vector. ✓ | NOTE |
+| Info | I3 | `apps/api/src/middleware/cors.ts:4-9` | `origin: '*'` with explicit `GET, OPTIONS` methods. Hono's CORS middleware does **not** set `Access-Control-Allow-Credentials: true` unless `credentials: true` is passed — verified by grep against `node_modules/hono`. Combined with `*` origin this would have been a CORS spec violation; absence is correct. ✓ | NOTE |
+| Info | I4 | `apps/api/wrangler.toml:1-18` | No secrets in committed file — `DATABASE_URL` set via `wrangler secret put` (documented in `.dev.vars.example` comment). `nodejs_compat` flag broadens runtime surface (needed for `@neondatabase/serverless`); acceptable. The committed comment leaks the deploy-time CF account subdomain hash `4431f38bb27a8e8db699525ef5b0f9fe` — non-sensitive (CF-internal routing identifier, not a credential), but worth scrubbing on principle. | NOTE |
+| Info | I5 | `apps/api/.gitignore` (root `/workspace/.gitignore:5-6`) | `.dev.vars` covered by `**/.dev.vars` with explicit `!**/.dev.vars.example` exception. ✓ No `.dev.vars` file committed. | NOTE |
+| Info | I6 | `apps/api/src/routes/listings.ts:91-94` | The count query (`select count(*)::int from service_listings where ...`) runs on **every** `GET /listings` request and is unbounded by `LIMIT/OFFSET`. With the table at MVP scale this is fine; at 100k+ rows + `ILIKE %x%` filter it becomes the slowest query. **Fix in M3:** approximate count (`pg_stat_user_tables.n_live_tup`) or cursor-based pagination without total. | FOLLOW-UP-M3 |
+| Info | I7 | `apps/api/src/index.ts:26,33` | `startTime` is captured at module init and reported by `/healthz` as `uptime` — but on CF Workers this is **per-isolate spawn time**, not service uptime. Cosmetic / observability gotcha; no security impact. | NOTE |
+
+### Checklist walkthrough
+
+1. ✅ **SQL injection.** All filters use Drizzle helpers (`eq`, `ilike`, `and`, `asc`, `desc`). The single `sql\`count(*)::int\`` is a column expression, not user data. The single `sql\`0\`` literals in schema defaults are static. No raw concatenation. `ilike` second arg is parametrized — but L4 notes the LIKE wildcards are not escaped (semantics, not injection).
+2. ✅ **Pagination integers.** `limit` is `z.coerce.number().int().min(1).max(100).default(20)` — string-to-int coercion + range. `limit=999` rejected at validate layer (test `listings.test.ts:127` covers this). `offset` lacks an upper bound — see L1.
+3. ✅ **Pubkey path params.** `^[1-9A-HJ-NP-Za-km-z]{32,44}$` regex applied to every `:pubkey` and `?owner=` query. Matches base58 alphabet (no `0`, `O`, `I`, `l`). Length range covers all real Solana pubkeys (32 bytes → 43-44 base58 chars; min 32 is a relaxation for testing but not exploitable for SQLi since the regex still excludes punctuation).
+4. ✅ **GROUP BY / ORDER BY user-controllable?** No GROUP BY. ORDER BY is gated by `z.enum(['reputation', 'price', 'completedJobs'])` and `z.enum(['asc', 'desc'])` — column reference is constructed in code from the validated enum, not from the raw string. ✓
+5. ✅ **Rate limit headers.** `standardHeaders: 'draft-7'` → emits `RateLimit-Policy` and `RateLimit` headers on every response, plus `Retry-After` on 429 (verified in `hono-rate-limiter@0.4.2/index.esm.js` source). 429 status code returned with structured `{ error: 'rate_limit_exceeded', message: ... }`. ✓
+6. ✅ **Per-IP keying.** Uses `cf-connecting-ip` first (correct CF header) — see L3 on the `x-forwarded-for` fallback.
+7. ⚠ **Per-agent keying.** `X-Agent-Pubkey` header is keyed without validation — see M1.
+8. ✅ **CORS.** `origin: '*'`, `allowMethods: ['GET', 'OPTIONS']`, no credentials. Spec-compliant.
+9. ✅ **Zod schemas.** `capability` capped at 256 chars (no DOS via 1MB body). `limit` 1-100. `owner` and path pubkeys both base58. ✓
+10. ✅ **Error message hygiene.** No stack, no DB error message, no field name leakage in 500. Zod issues strip input value (no XSS reflection). ✓
+11. ✅ **Secrets.** No secrets committed. `.dev.vars` git-ignored. `.dev.vars.example` placeholder shape only.
+12. ⚠ **DDoS / resource budget.** Documented as M3 follow-up — see L1, L2, I6.
+13. ⚠ **Schema duplication.** Documented as M3 follow-up — see M2.
+
+### Cross-checks performed
+
+- ✅ `grep -rn "z.coerce\|z.string\|sql\`" apps/api/src/` — only one `sql\`count(*)::int\`` in `listings.ts:92` (column expr, not user data); two `sql\`0\`` literals in `schema.ts:55,113` (numeric defaults, not user data).
+- ✅ `grep -E "serviceListings\.|escrows\.|agentReputation\." apps/api/src/routes/*.ts` — verified every column access maps to a column declared in `apps/api/src/db/schema.ts`. No drift between the API's view of the schema and what it queries.
+- ✅ `diff apps/api/src/db/schema.ts apps/indexer/src/db/schema.ts` — substantive diffs are JSDoc/comments + `customType<{data: Buffer}>` (indexer) vs `customType<{data: string}>` (api). API never reads `capabilityHash` so the type difference is not exercised in API code paths.
+- ✅ `node_modules/hono-rate-limiter/index.esm.js` — confirmed `Retry-After` is set by `'draft-7'` standardHeaders mode when `totalHits > limit`.
+- ✅ `.gitignore` rule `**/.dev.vars` with `!**/.dev.vars.example` exception (lines 5-6).
+- ✅ `wrangler.toml` contains no secrets — only `APP_VERSION` var. Documented secret list in comment.
+- ✅ Tests: 22 unit tests cover happy path (200), pagination, validation (400 for bad pubkey, bad limit, bad sort enum), not-found (404), CORS preflight (204), and the X-Agent-Pubkey rate-limit header path. No live integration tests yet — deferred to qa-test-eng Task #58 (acceptable: smoke against deployed URL is a separate concern).
+- ✅ No `console.log` of secrets, no DB error message exposure in any 500 path, no PII in logs (only the URL path and method via Hono's default).
+- ✅ Healthz: `{ ok, version, uptime }` — `version` from env (set in wrangler.toml `APP_VERSION = "0.1.0"` non-secret), `uptime` is per-isolate spawn delta (cosmetic).
+
+### Verdict
+
+**APPROVED** for merge. No critical or high-severity blockers; the read-only scope and absence of a fund-flow / signing surface limit the worst case to DOS / budget-drain (recoverable) rather than fund-loss.
+
+The two **Medium** findings (M1: header-keyed rate-limit map without validation, M2: schema duplication) are tracked as M3 follow-ups, not merge blockers — M1 because the `100/min` IP fallback still caps the OOM rate at the isolate level (and CF respawns isolates), M2 because the schemas are aligned today and a divergence is not yet exploitable.
+
+**Recommended follow-ups for M3 (in priority order):**
+
+1. **(M1)** Validate `X-Agent-Pubkey` header as base58 before keying rate-limit map; fall back to IP on mismatch. Closes the rate-limit-bypass amplifier and the per-isolate memory-exhaustion vector. ~10 LOC, ratelimit.ts.
+2. **(L1)** Clamp `offset` to a sane upper bound (e.g. 10k) as a band-aid; design cursor-based pagination for the real fix. Add `pg_trgm` GIN index on `service_listings.capability` if substring search is the canonical UX.
+3. **(M2)** Extract `apps/api/src/db/schema.ts` and `apps/indexer/src/db/schema.ts` to `packages/db-schema/`. Single source of truth prevents silent drift and ensures security-auditor sees every column-shape change once.
+4. **(L2)** Migrate from `hono-rate-limiter` MemoryStore to CF native Rate Limiting binding (or Upstash Redis) before mainnet. Per-isolate best-effort is acceptable for MVP; not for live USDC settlement traffic.
+5. **(L4)** Escape `%` and `_` in user-supplied `capability` filter before interpolation into the LIKE pattern, or switch to a trigram operator. Defensive; not exploitable today.
+
+**Recommended merge order:** PR #90 first, then this audit-notes PR after.
+
 
 ---
 
