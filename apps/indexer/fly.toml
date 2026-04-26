@@ -1,0 +1,38 @@
+# Fly.io configuration for agentbazaar-indexer
+# Deployed region: ams (Amsterdam) — close to Helius Frankfurt for low webhook latency
+# DO NOT scale min_machines_running below 1: webhook delivery would silently fail.
+
+app = "agentbazaar-indexer"
+primary_region = "ams"
+
+[build]
+  # Dockerfile path is relative to fly.toml location (apps/indexer/).
+  # Deploy with: flyctl deploy --config apps/indexer/fly.toml from monorepo root,
+  # which sets the build context to monorepo root automatically.
+  dockerfile = "Dockerfile"
+
+[http_service]
+  internal_port = 3001
+  force_https = true
+  auto_start_machines = true
+  auto_stop_machines = false
+  min_machines_running = 1
+
+  [http_service.concurrency]
+    type = "requests"
+    hard_limit = 200
+    soft_limit = 150
+
+[[checks]]
+  name = "healthz"
+  type = "http"
+  interval = "15s"
+  timeout = "5s"
+  grace_period = "20s"
+  method = "GET"
+  path = "/healthz"
+  port = 3001
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"

@@ -9,12 +9,15 @@ Two program IDs are monitored: `bazaar-registry` and `bazaar-escrow`.
 |---|---|
 | **Webhook ID** | `430f2432-ccf5-41cd-9d76-c836946c9efc` |
 | **Type** | `enhanced` (devnet) |
-| **Current URL** | `https://perdurable-spumescent-elvis.ngrok-free.dev/webhooks/helius` |
+| **Current URL** | `https://agentbazaar-indexer.fly.dev/webhooks/helius` (Fly.io prod — M2) |
+| **Previous URL** | `https://perdurable-spumescent-elvis.ngrok-free.dev/webhooks/helius` (ngrok dev) |
 | **Programs monitored** | `ADWoSmfUWLLRGMWZ61xuAMPhDgG77ziqAC5MA9voqLn3` (registry), `EhFptDs4mz6rt7HDmt8pB7ZogiqxUMVhpjB3NvToXxW2` (escrow) |
 
-The webhook was created via the Helius API. The URL points to the static ngrok
-free domain associated with this Helius account. See **Smoke test** below to
-activate the tunnel.
+The webhook was updated to the Fly.io prod URL as part of M2-W1.A (Task #52).
+See [fly-deploy.md](./fly-deploy.md) for the full deployment guide.
+
+For local development, the ngrok tunnel can still be activated and the webhook
+URL temporarily switched back. See **Smoke test** below.
 
 ## Required env vars
 
