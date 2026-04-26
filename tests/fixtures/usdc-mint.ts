@@ -1,7 +1,11 @@
 /**
- * Test USDC mint scaffold for M1 escrow tests.
- * Not required for M0 (no escrow), but kept here so M1 tests can import it
- * without boilerplate.
+ * USDC mint constants and test-local-validator mint scaffold.
+ *
+ * For devnet E2E tests use DEVNET_USDC_MINT — the real Circle devnet USDC
+ * whose address is hard-coded in the bazaar-escrow program constraint.
+ *
+ * For unit tests that run against a local validator (where Circle USDC does not
+ * exist) use deployLocalValidatorMint() to spin up a fresh mint.
  */
 import {
   createAssociatedTokenAccountInstruction,
@@ -14,22 +18,32 @@ import {
 import {
   type Connection,
   Keypair,
-  type PublicKey,
+  type PublicKey as PK,
+  PublicKey,
   SystemProgram,
   Transaction,
 } from '@solana/web3.js';
 import type { FundedWallet } from './wallets.js';
 
+/**
+ * Circle devnet USDC — the mint address the bazaar-escrow program constrains
+ * against.  All devnet E2E tests must use this address.
+ */
+export const DEVNET_USDC_MINT = new PublicKey('4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU');
+
 export interface TestMint {
-  mint: PublicKey;
+  mint: PK;
   mintAuthority: Keypair;
 }
 
 /**
- * Deploy a fresh SPL Token mint with 6 decimals (matching USDC).
- * The payer keypair acts as both payer and mint authority.
+ * Deploy a fresh SPL Token mint with 6 decimals (matching USDC) on a local
+ * test validator.  Do NOT call this in devnet E2E tests — the bazaar-escrow
+ * program rejects any mint that is not DEVNET_USDC_MINT.
+ *
+ * Kept for unit tests that need an arbitrary mint on a local-validator cluster.
  */
-export async function deployTestMint(
+export async function deployLocalValidatorMint(
   connection: Connection,
   payer: FundedWallet,
 ): Promise<TestMint> {
@@ -68,8 +82,10 @@ export async function deployTestMint(
 }
 
 /**
- * Mint `amount` (in micro-units, 6 decimals) of the test token to each wallet.
- * Creates an ATA for the wallet if it doesn't exist.
+ * Mint `amount` (in micro-units, 6 decimals) of a local-validator test token
+ * to each wallet.  Creates an ATA for each recipient if it doesn't exist.
+ *
+ * For use with deployLocalValidatorMint() in unit tests only.
  */
 export async function mintToWallets(
   connection: Connection,

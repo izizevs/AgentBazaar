@@ -1,4 +1,9 @@
 import {
+  getOrCreateAssociatedTokenAccount,
+  TokenAccountNotFoundError,
+  transferChecked,
+} from '@solana/spl-token';
+import {
   Connection,
   Keypair,
   type Keypair as KP,
@@ -7,6 +12,40 @@ import {
   SystemProgram,
   Transaction,
 } from '@solana/web3.js';
+import { DEVNET_USDC_MINT } from './usdc-mint.js';
+
+/**
+ * Retry wrapper for getOrCreateAssociatedTokenAccount.
+ *
+ * spl-token 0.4.x has a known race: after submitting the create-ATA tx, it
+ * calls getAccount() to return the new account object.  Under 429 rate-limit
+ * pressure (multiple parallel test suites) that fetch can receive a stale
+ * "account not found" even though the tx confirmed.  Retry up to 5 times
+ * with exponential back-off before propagating.
+ */
+async function getOrCreateAta(
+  connection: Connection,
+  payer: Keypair,
+  mint: PublicKey,
+  owner: PublicKey,
+  maxRetries = 5,
+): ReturnType<typeof getOrCreateAssociatedTokenAccount> {
+  let delay = 1000;
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      return await getOrCreateAssociatedTokenAccount(connection, payer, mint, owner);
+    } catch (err) {
+      if (err instanceof TokenAccountNotFoundError && attempt < maxRetries) {
+        await new Promise((r) => setTimeout(r, delay));
+        delay = Math.min(delay * 2, 8000);
+        continue;
+      }
+      throw err;
+    }
+  }
+  // unreachable; for type-checker only
+  throw new Error('getOrCreateAta: exhausted retries');
+}
 
 const AIRDROP_SOL = 0.1;
 
@@ -105,5 +144,51 @@ async function fundFromFaucet(
   await connection.confirmTransaction(
     { signature: sig, blockhash, lastValidBlockHeight },
     'confirmed',
+  );
+}
+
+/**
+ * Transfer `amountBaseUnits` of Circle devnet USDC (DEVNET_USDC_MINT) from the
+ * master wallet to `recipient`.
+ *
+ * Steps:
+ *   1. Derive master's ATA (or create if missing) — idempotent via
+ *      getOrCreateAssociatedTokenAccount.
+ *   2. Derive recipient's ATA (or create if missing) — pays SOL rent only when
+ *      creating; idempotent on subsequent calls.
+ *   3. transferChecked from master ATA to recipient ATA (skipped when amount is 0).
+ *
+ * The `master` keypair must already hold enough USDC and SOL for fees/rent.
+ * Pass amountBaseUnits=0n to create the recipient ATA without transferring USDC.
+ */
+export async function fundUsdc(
+  connection: Connection,
+  master: Keypair,
+  recipient: PublicKey,
+  amountBaseUnits: bigint,
+): Promise<void> {
+  // Ensure both ATAs exist (idempotent — no-op if already created).
+  const masterAccount = await getOrCreateAta(
+    connection,
+    master,
+    DEVNET_USDC_MINT,
+    master.publicKey,
+  );
+  const recipientAccount = await getOrCreateAta(connection, master, DEVNET_USDC_MINT, recipient);
+
+  if (amountBaseUnits === 0n) {
+    // Caller only wants the ATA created; no transfer needed.
+    return;
+  }
+
+  await transferChecked(
+    connection,
+    master, // fee payer + source authority
+    masterAccount.address, // source ATA
+    DEVNET_USDC_MINT,
+    recipientAccount.address, // destination ATA
+    master, // owner of source ATA
+    amountBaseUnits,
+    6, // USDC decimals
   );
 }

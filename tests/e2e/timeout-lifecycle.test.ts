@@ -9,7 +9,7 @@
  * Clock.unix_timestamp + timeout, claimTimeout would fail with EscrowNotExpiredError
  * after our 35-second wait.
  *
- * Task #29.
+ * Task #29 / R4 (Task #50).
  */
 
 import { readFileSync } from 'node:fs';
@@ -20,8 +20,8 @@ import { Wallet } from '@coral-xyz/anchor';
 import { getAssociatedTokenAddressSync } from '@solana/spl-token';
 import { Connection, Keypair, type PublicKey } from '@solana/web3.js';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { deployTestMint, mintToWallets } from '../fixtures/usdc-mint.js';
-import { createFundedWallets, type FundedWallet } from '../fixtures/wallets.js';
+import { DEVNET_USDC_MINT } from '../fixtures/usdc-mint.js';
+import { createFundedWallets, type FundedWallet, fundUsdc } from '../fixtures/wallets.js';
 import { assertEscrowState, assertVaultBalance } from '../helpers/escrow-assertions.js';
 
 function loadCliPayer(): Keypair | undefined {
@@ -60,12 +60,19 @@ describe.skipIf(!isE2E)('E2E: escrow timeout path', { timeout: 180_000 }, () => 
     buyerWallet = funded[0]!;
     sellerWallet = funded[1]!;
 
-    const testMint = await deployTestMint(connection, buyerWallet);
-    // Fund buyer generously (two escrows: 30s + 3600s timeouts)
-    await mintToWallets(connection, testMint, buyerWallet, [buyerWallet], BUDGET * 3n);
-    await mintToWallets(connection, testMint, buyerWallet, [sellerWallet], 1n);
+    // Load the master keypair (same as CLI payer) to fund USDC from its balance.
+    const master =
+      payer ??
+      (() => {
+        throw new Error('Master keypair not found — check ~/.config/solana/id.json');
+      })();
 
-    const usdcMintStr = testMint.mint.toBase58();
+    // Fund buyer with 1.5 USDC (two escrows at 0.5 USDC each + slop).
+    await fundUsdc(connection, master, buyerWallet.publicKey, 1_500_000n);
+    // Create seller ATA (0 USDC) so it is ready to receive on claimTimeout().
+    await fundUsdc(connection, master, sellerWallet.publicKey, 0n);
+
+    const usdcMintStr = DEVNET_USDC_MINT.toBase58();
 
     sellerBazaar = new AgentBazaar({
       wallet: new Wallet(sellerWallet.keypair),
@@ -132,7 +139,7 @@ describe.skipIf(!isE2E)('E2E: escrow timeout path', { timeout: 180_000 }, () => 
     // Wait for the 30-second deadline to pass (5-second buffer for devnet lag)
     await new Promise((resolve) => setTimeout(resolve, 35_000));
 
-    const sellerAta = getAssociatedTokenAddressSync(sellerBazaar.usdcMint, sellerWallet.publicKey);
+    const sellerAta = getAssociatedTokenAddressSync(DEVNET_USDC_MINT, sellerWallet.publicKey);
     const sellerBalanceBefore = BigInt(
       (await connection.getTokenAccountBalance(sellerAta)).value.amount,
     );

@@ -8,8 +8,9 @@
  *   SOLANA_RPC_URL — Helius devnet endpoint (with API key)
  *   PINATA_JWT     — Pinata JWT for metadata upload
  *
- * Uses a freshly deployed test USDC mint so no real USDC is needed.
- * Task #28.
+ * Uses Circle devnet USDC (4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU) and
+ * funds test wallets from the master devnet wallet via fundUsdc().
+ * Task #28 / R4 (Task #50).
  */
 
 import { readFileSync } from 'node:fs';
@@ -21,8 +22,8 @@ import { Wallet } from '@coral-xyz/anchor';
 import { getAssociatedTokenAddressSync } from '@solana/spl-token';
 import { Connection, Keypair, type PublicKey } from '@solana/web3.js';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { deployTestMint, mintToWallets } from '../fixtures/usdc-mint.js';
-import { createFundedWallets, type FundedWallet } from '../fixtures/wallets.js';
+import { DEVNET_USDC_MINT } from '../fixtures/usdc-mint.js';
+import { createFundedWallets, type FundedWallet, fundUsdc } from '../fixtures/wallets.js';
 import { assertEscrowState, assertVaultBalance } from '../helpers/escrow-assertions.js';
 import { assertListingExists } from '../helpers/state-assertions.js';
 
@@ -40,6 +41,8 @@ const isE2E = process.env.E2E === 'true';
 
 // Budget: 1 USDC in micro-units (6 decimals)
 const BUDGET = 1_000_000n;
+// Fund buyer with 1.5 USDC to cover escrow budget + slop
+const BUYER_USDC_FUND = 1_500_000n;
 
 describe.skipIf(!isE2E)('E2E: full escrow lifecycle (happy path)', { timeout: 180_000 }, () => {
   const rpcUrl = process.env.SOLANA_RPC_URL ?? 'https://api.devnet.solana.com';
@@ -63,12 +66,19 @@ describe.skipIf(!isE2E)('E2E: full escrow lifecycle (happy path)', { timeout: 18
     buyerWallet = funded[0]!;
     sellerWallet = funded[1]!;
 
-    const testMint = await deployTestMint(connection, buyerWallet);
-    // Create seller ATA (tiny amount) so it's ready to receive funds
-    await mintToWallets(connection, testMint, buyerWallet, [buyerWallet], BUDGET + 100_000n);
-    await mintToWallets(connection, testMint, buyerWallet, [sellerWallet], 1n);
+    // Load the master keypair (same as CLI payer) to fund USDC from its balance.
+    const master =
+      payer ??
+      (() => {
+        throw new Error('Master keypair not found — check ~/.config/solana/id.json');
+      })();
 
-    const usdcMintStr = testMint.mint.toBase58();
+    // Fund buyer with real Circle devnet USDC; seller needs ATA for receipt.
+    await fundUsdc(connection, master, buyerWallet.publicKey, BUYER_USDC_FUND);
+    // Create seller ATA (0 USDC) so it is ready to receive on confirm().
+    await fundUsdc(connection, master, sellerWallet.publicKey, 0n);
+
+    const usdcMintStr = DEVNET_USDC_MINT.toBase58();
 
     sellerBazaar = new AgentBazaar({
       wallet: new Wallet(sellerWallet.keypair),
@@ -138,7 +148,7 @@ describe.skipIf(!isE2E)('E2E: full escrow lifecycle (happy path)', { timeout: 18
   });
 
   it('confirm() releases USDC to seller and closes escrow', async () => {
-    const sellerAta = getAssociatedTokenAddressSync(buyerBazaar.usdcMint, sellerWallet.publicKey);
+    const sellerAta = getAssociatedTokenAddressSync(DEVNET_USDC_MINT, sellerWallet.publicKey);
     const sellerBalanceBefore = BigInt(
       (await connection.getTokenAccountBalance(sellerAta)).value.amount,
     );
