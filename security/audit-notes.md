@@ -5386,3 +5386,259 @@ No admin-key, vault-PDA, or upgrade-authority surface is touched.
 3. Extend `mapProgramCode` lookup table to cover all 11 escrow error codes (I3) — complete the typed-exception surface.
 4. Repo-wide audit of vitest configs for similar silent-skip gaps (I4) — meta-fix.
 
+
+---
+
+## PR #89 — feature/indexer-m1.5-polish — 2026-04-26
+**Verdict:** APPROVED (with non-blocking low-severity follow-ups)
+
+**Reviewer:** security-auditor (claude-opus-4-7, 1M context)
+**Branch:** `feature/indexer-m1.5-polish`
+**Author:** AgentBazaar (backend-eng)
+**Task:** #57 (M1.5 carry-forward polish — bundles L1 + L2 + L3 from PRs #79/#80, plus column rename + Node pin)
+
+### Scope of review
+
+Five M1.5 deferred items in a single PR. Three are security-relevant; two are
+operational hygiene. Re-ran every IP probe vector from the prior PR #80 audit
+against the new ipaddr.js implementation and added new vectors enabled by
+ipaddr.js semantics (CGNAT, IPv6 tunneling, RFC reserved ranges, numeric
+encodings).
+
+| File | Lines | Audit weight |
+|---|---|---|
+| `apps/indexer/src/events/fetch-metadata.ts` | +62 / -32 | **High — SSRF surface** |
+| `apps/indexer/src/env.ts` | +8 / -1 | Low — operational |
+| `apps/indexer/src/cron/retention.ts` | +15 / -2 | None — comment |
+| `apps/indexer/src/db/schema.ts` | +4 / -2 | Low — column rename |
+| `apps/indexer/drizzle/0005_rename_price_column.sql` | +9 / 0 | Low — DDL |
+| `apps/indexer/drizzle/meta/0005_snapshot.json` | +445 / 0 | Low — bookkeeping |
+| `apps/indexer/src/events/on-listing-{created,updated}.ts` | +8 / -8 | Low — INSERT/UPDATE rename |
+| `apps/indexer/tests/fetch-metadata-ssrf.test.ts` | +13 / -1 | Test |
+| `apps/indexer/tests/env-schema.test.ts` | +55 / 0 | Test |
+| `apps/indexer/tests/migration.test.ts` | +2 / -1 | Test |
+| `apps/indexer/package.json` | +4 / 0 | Operational pin |
+
+### IP-probe regression matrix (empirically tested with `ipaddr.js@2.3.0`)
+
+Ran every vector through the new `isPrivateIp` (ipaddr.parse → IPv4-mapped
+unwrap → range() → BLOCKED_RANGES set lookup). Matches the function logic
+exactly.
+
+| Probe | ipaddr.js range | Result | PR #80 vector? |
+|---|---|---|---|
+| `127.0.0.1` | loopback | BLOCK | yes |
+| `10.0.0.1` | private | BLOCK | yes |
+| `172.16.0.0` | private | BLOCK | yes |
+| `192.168.1.1` | private | BLOCK | yes |
+| `169.254.169.254` (AWS/GCP IMDS) | linkLocal | **BLOCK** | yes |
+| `0.0.0.0` | unspecified | BLOCK | yes (H1) |
+| `8.8.8.8` (Google DNS) | unicast | ALLOW (correct) | yes |
+| `1.2.3.4` | unicast | ALLOW (correct) | yes |
+| `::1` | loopback | BLOCK | yes |
+| `fe80::1` | linkLocal | BLOCK | yes |
+| `FE80::1` (uppercase) | linkLocal | BLOCK | yes (H1 regression) |
+| `fc00::1` | uniqueLocal | BLOCK | yes |
+| `ff02::1` | multicast | BLOCK | yes |
+| `2606:4700:4700::1111` (Cloudflare) | unicast | ALLOW (correct) | yes (negative) |
+| `::ffff:127.0.0.1` (IPv4-mapped loopback) | loopback (post-unwrap) | BLOCK | yes (H1) |
+| `::ffff:169.254.169.254` (IPv4-mapped IMDS) | linkLocal (post-unwrap) | BLOCK | yes (H1) |
+| `100.64.0.1` (CGNAT start) | carrierGradeNat | BLOCK | **NEW (L3)** |
+| `100.127.255.255` (CGNAT end) | carrierGradeNat | BLOCK | **NEW (L3)** |
+| `224.0.0.1` (IPv4 multicast) | multicast | BLOCK | new (gain) |
+| `239.255.255.255` (IPv4 multicast end) | multicast | BLOCK | new (gain) |
+| `2002:7f00:1::` (6to4 wrapping 127.0.0.1) | 6to4 | BLOCK | new (gain) |
+| `0177.0.0.1` (octal-encoded 127.0.0.1) | loopback | BLOCK (parsed as 127.0.0.1) | bypass-attempt |
+| `0x7f.0.0.1` (hex-encoded) | loopback | BLOCK (parsed as 127.0.0.1) | bypass-attempt |
+| `2130706433` (decimal-int 127.0.0.1) | loopback | BLOCK (parsed as 127.0.0.1) | bypass-attempt |
+
+**Verified:** all 4 H1 regression tests from PR #80 are still in
+`tests/fetch-metadata-ssrf.test.ts`; the migration did not delete them.
+The 2 new CGNAT regression tests have been added (lines 117–127).
+
+**Bypass-attempt observation:** `ipaddr.js` is *more permissive* on input
+formats than the previous regex chain — it accepts octal (`0177`), hex
+(`0x7f`), and decimal-integer (`2130706433`) IPv4 representations, all of
+which normalise to `127.0.0.1` octets and are correctly classified as
+loopback. This is actually a net **gain in safety**: the previous regex
+`/^127\./` would have *failed to match* `0177.0.0.1` (because the regex
+sees the literal string), passing the address through unchanged for
+DNS resolution where the OS might or might not normalise. Now ipaddr.js
+normalises *before* the range check. **No bypass found.**
+
+### Findings
+
+- **Critical:** none.
+
+- **High:** none.
+
+- **Medium:** none.
+
+- **Low:**
+
+  - **L1. `BLOCKED_RANGES` set omits five ipaddr.js range names that may be
+    worth blocking for defence-in-depth.** Empirical tests show the
+    following addresses pass through `isPrivateIp` (returning ALLOW):
+    - `255.255.255.255` → range `broadcast`. IPv4 limited broadcast.
+      Could in theory be returned by a misconfigured DNS to deliver a
+      packet to all hosts on the local LAN segment. Low real-world risk
+      (broadcast doesn't traverse routers) but the gain from blocking is
+      free.
+    - `240.0.0.1`, `198.18.0.1`, `192.0.2.1`, `203.0.113.1` → range
+      `reserved`. Includes RFC 5737 documentation ranges
+      (`192.0.2.0/24`, `198.51.100.0/24`, `203.0.113.0/24`), RFC 2544
+      benchmarking (`198.18.0.0/15`), and RFC 1112 class E (`240.0.0.0/4`).
+      None of these *should* appear in real DNS, so seeing one is itself
+      suspicious — fail-closed is the safer policy.
+    - `100::1` → range `discard` (RFC 6666 IPv6 discard prefix). Designed
+      for sinkholing; if an internal sinkhole receives indexer traffic,
+      it could be a covert channel.
+    - `2001:db8::1` → range `reserved` (RFC 3849 IPv6 documentation).
+      Same logic as IPv4 reserved.
+    - `2001:1::1`, `2001:2::1`, `2001:10::1` → ranges
+      `reserved` / `benchmarking` / `deprecated`.
+
+    **Recommended fix:** extend `BLOCKED_RANGES` set in
+    `apps/indexer/src/events/fetch-metadata.ts:87-100` to include
+    `'broadcast', 'reserved', 'discard', 'benchmarking', 'as112',
+    'as112v6', 'amt', 'deprecated', 'orchid2'`. The complete blocklist
+    becomes "everything except `unicast`" — which is the cleaner mental
+    model the JSDoc on lines 60–62 already promises. **Severity Low**
+    because none of these are likely real-world SSRF targets, but
+    aligning code to the JSDoc ("block anything that is NOT unicast")
+    is a small mechanical change. **Not a merge blocker.**
+
+  - **L2. Drizzle snapshot `0005_snapshot.json:354` references the OLD
+    column name in the `idx_service_listings_discover` index expression.**
+    The `service_listings.columns.price_usdc_base_units` entry on line 315
+    is correct, but the index entry on line 354 still says
+    `"expression": "price_lamports"`. This is a snapshot-generation
+    inconsistency: the live `schema.ts` builds the index from
+    `t.priceUsdcBaseUnits`, which Drizzle should have serialised as the
+    new column name.
+
+    **Runtime impact:** none. Postgres `RENAME COLUMN` updates the column
+    by attribute number (pg_attribute.attnum), not by name string, so any
+    existing index on the renamed column continues to work and its
+    `pg_get_indexdef` output reflects the new column name automatically.
+    The DB stays consistent.
+
+    **Future impact:** the next `drizzle-kit generate` run will diff the
+    live `schema.ts` (new name) against the snapshot (mixed names) and
+    will likely emit a no-op or surprise migration. Cleanup recommended
+    before the next migration is generated.
+
+    **Recommended fix:** either regenerate the snapshot
+    (`pnpm --filter @agentbazaar/indexer db:generate` after applying #5)
+    or hand-edit `0005_snapshot.json:354` to read
+    `"expression": "price_usdc_base_units"` and update the snapshot `id`
+    to invalidate stale caches. **Not a merge blocker** — the snapshot
+    is a developer-tool artifact, not part of the runtime path.
+
+  - **L3. Deploy ordering for the price-column rename is unavoidably
+    non-zero-downtime.** Because the migration is a `RENAME COLUMN` and
+    not an additive change, *both* orderings cause a brief window where
+    one of {indexer code, DB schema} references a column the other does
+    not have:
+    - Code-first: new code's `INSERT INTO service_listings (..., price_usdc_base_units, ...)` fails until migration applies → silent webhook drop (and dead-letter to logs).
+    - Migration-first: old code's `INSERT INTO service_listings (..., price_lamports, ...)` fails until new code rolls out → same symptom.
+
+    The PR body acknowledges this and prescribes a low-traffic window.
+    Acceptable for devnet (current state). **For mainnet rollout**, prefer
+    the additive expand–migrate–contract pattern: (1) add new column with
+    backfill from old, (2) dual-write from app, (3) backfill rows,
+    (4) drop old column in a follow-up migration. Or accept ~30 s of
+    webhook backlog (Helius retries) and apply during a controlled
+    maintenance window.
+
+    **Severity Low (operational, not security).** The escrow money path
+    does not depend on `service_listings.price_usdc_base_units`; only the
+    Discovery API does. Worst case is briefly stale listing prices, not
+    fund movement.
+
+  - **L4. `engines.node = "22.x"` in `package.json` is `pnpm install`
+    advisory only, not a runtime constraint.** The Dockerfile already
+    pins `FROM node:22-alpine`, so production runtime IS pinned. CI
+    runners may not be pinned the same way.
+
+    **Recommended follow-up:** add a `.nvmrc` file at repo root with
+    `22` (or `22.22.2` exact) and pin GitHub Actions
+    `actions/setup-node@v4` with `node-version-file: '.nvmrc'`. **Not a
+    merge blocker** — defensive only.
+
+  - **L5. RETENTION_INTERVAL_MS Zod refine error message is OK but minor
+    UX improvement possible.** Current message:
+    `"must be 0 (disabled) or >= 60_000 ms"`. This is clear. The
+    `setTimeout(60s) + setInterval(intervalMs)` design correctly
+    short-circuits when `intervalMs === 0` (line 44 of `retention.ts`).
+    Verified the cron logic: if a Zod-valid `0` reaches
+    `startRetentionCron`, the early-return on line 44–47 prevents both
+    timers from being created. No bug.
+
+- **Info:**
+
+  - **I1.** `ipaddr.js` correctly handles non-standard IPv4 numeric
+    encodings (octal, hex, decimal-int). This is a **net security
+    improvement** over the prior regex chain, which would have failed to
+    match `0177.0.0.1` and similar bypass attempts. Worth noting in the
+    JSDoc that this is intentional.
+
+  - **I2.** The IPv4-mapped IPv6 unwrap at lines 77–82 is now slightly
+    redundant with the `'ipv4Mapped'` entry in `BLOCKED_RANGES` (a
+    fully-mapped `::ffff:x.x.x.x` would be blocked by both paths). The
+    unwrap is correct and the redundancy is intentional defence-in-depth
+    — the comment on lines 73–76 explains this. **No action.**
+
+  - **I3.** `ipaddr.js@2.3.0` is the version actually resolved
+    (`pnpm-lock.yaml`), satisfying the `^2.2.0` spec. License is MIT.
+    Upstream maintainer is whitequark, who maintains it as part of the
+    nodejs ecosystem (it's a dep of `proxy-addr` which is used by Express
+    and basically every Node web framework). Low supply-chain risk.
+
+### Cross-checks performed
+
+- ✅ All 4 PR #80 H1 regression tests still present in
+  `apps/indexer/tests/fetch-metadata-ssrf.test.ts`
+  (`::ffff:127.0.0.1`, `::ffff:169.254.169.254`, `0.0.0.0`, `FE80::1`).
+- ✅ IPv4-mapped IPv6 unwrap path verified by hand against ipaddr.js source
+  (`/node_modules/.pnpm/ipaddr.js@2.3.0/...`).
+- ✅ Bypass attempt `0177.0.0.1` (octal) parsed by ipaddr.js to octets
+  `[127,0,0,1]` → range `loopback` → BLOCKED. Same for `0x7f.0.0.1` (hex)
+  and `2130706433` (decimal-int).
+- ✅ DNS pinning (I2) and streaming cap (I1) from PR #80 unchanged — only
+  `isPrivateIp` was migrated.
+- ✅ Cron `intervalMs === 0` short-circuit at `retention.ts:44–47` confirmed
+  to skip BOTH the initial `setTimeout` AND the `setInterval` — no
+  silent timer leak.
+- ✅ Migration `0005_rename_price_column.sql` is a single
+  `ALTER TABLE ... RENAME COLUMN` — metadata-only, no row rewrite, brief
+  `ACCESS EXCLUSIVE` lock. Indexes auto-update via attnum reference.
+- ✅ Node version pin: Dockerfile `FROM node:22-alpine` (line 7) matches
+  `engines.node: 22.x` — runtime IS pinned via the image, the
+  package.json pin is belt-and-suspenders.
+- ✅ No new secrets; no `console.log`; no hardcoded URLs; no DNS
+  fallthrough that bypasses the pin.
+
+### Verdict
+
+**APPROVED.** Safe to merge to `main` and deploy to devnet. None of the
+findings are blockers. The L3 ipaddr.js migration is a strict improvement
+in SSRF defence — it both removes hand-rolled regex maintenance burden
+*and* defeats numeric-encoding bypass attempts that the prior code did not
+handle.
+
+**Recommended follow-ups (track as M2-W6 polish):**
+
+1. **Extend BLOCKED_RANGES set** (L1) to include `broadcast`, `reserved`,
+   `discard`, `benchmarking`, `as112`, `as112v6`, `amt`, `deprecated`,
+   `orchid2`. Aligns implementation with JSDoc promise of "anything that
+   is NOT unicast".
+2. **Regenerate Drizzle snapshot** (L2) so
+   `idx_service_listings_discover` references the new column name.
+   Avoids surprise migration on next `db:generate`.
+3. **Add `.nvmrc` + pin GitHub Actions Node version** (L4). Defensive
+   alignment with `engines.node`.
+4. **Future mainnet column-rename pattern** (L3): adopt
+   expand–migrate–contract for any non-additive schema change to avoid
+   the dual-window unavailability.
+
