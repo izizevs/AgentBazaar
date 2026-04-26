@@ -1,6 +1,7 @@
 import type { BazaarEscrow } from '@agentbazaar/idl';
 import { BazaarEscrowIDL } from '@agentbazaar/idl';
 import { AnchorProvider, Program } from '@coral-xyz/anchor';
+import { ASSOCIATED_TOKEN_PROGRAM_ID, TOKEN_PROGRAM_ID } from '@solana/spl-token';
 import {
   ComputeBudgetProgram,
   type Connection,
@@ -17,8 +18,7 @@ import {
 } from './errors.js';
 import { clusterFromConnection, PROGRAM_IDS } from './program-ids.js';
 
-export const TOKEN_PROGRAM_ID = new PublicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA');
-const ASSOCIATED_TOKEN_PROGRAM_ID = new PublicKey('ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJe1bC8');
+export { TOKEN_PROGRAM_ID };
 
 /** Returns the bazaar-escrow program ID for the cluster inferred from `connection`. */
 export function getEscrowProgramId(connection: Connection): PublicKey {
