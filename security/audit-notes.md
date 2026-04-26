@@ -4838,3 +4838,123 @@ runtime validation) — those can be separate PRs.
   fast instead of silently dropping all registry txs.
 - **I4 (cosmetic).** PR title task-number drift; harmless.
 
+
+---
+
+## PR #77 — feature/sdk-cluster-aware-ids — 2026-04-26
+**Verdict:** APPROVED (with non-blocking follow-ups)
+
+**Tasks closed:** #39 (per-cluster program ID table + bump 0.2.0), #40 (IDL regen + `priceLamports` → `priceUsdcBaseUnits` propagation in SDK).
+**Resolves:** the carryforward `M1/M2 (sdk-eng — pre-mainnet blocker)` from PR #74's notes — stale M0 registry ID `GJRgCC...QqYgchQqd` no longer reachable from any SDK execution path.
+
+**Scope of review:**
+- `packages/sdk/src/program-ids.ts` (new, +90)
+- `packages/sdk/src/errors.ts` (`UnknownClusterError`, +14)
+- `packages/sdk/src/register.ts` (cluster-aware PDA derivation)
+- `packages/sdk/src/escrow-utils.ts` (cluster-aware `getEscrowProgramId`)
+- `packages/sdk/src/hire.ts`, `packages/sdk/src/index.ts` (exports)
+- `packages/sdk/tests/program-ids.test.ts` (new, 17 unit tests)
+- `tests/helpers/tx-utils.ts`, `tests/e2e/register-discover.test.ts`
+- `packages/sdk/package.json` (`0.2.0`)
+
+Walked: address-correctness vs `packages/idl/idl/bazaar_*.json`, fail-safe
+properties of `clusterFromConnection()`, exhaustive grep for stale M0 ID and
+for new hardcoded base58 program-IDs outside `program-ids.ts`,
+`UnknownClusterError` shape vs the BazaarError hierarchy from PR #51,
+breaking-change blast radius for `tests/helpers/tx-utils.ts`.
+
+**Findings:**
+
+- **Critical:** none.
+- **High:** none.
+- **Medium:** none.
+
+- **Low:**
+  - **L1. Test fixtures still reference the old M0 registry ID as opaque
+    PDA strings.** Five hits remain after the cleanup:
+    `packages/sdk/tests/hire.test.ts:52` (`LISTING_PDA`),
+    `packages/sdk/tests/escrow-methods.test.ts:64` (`ESCROW_PDA`),
+    `packages/sdk/tests/client.test.ts:100,109,115,122` (escrow ID args
+    to `deliver` / `confirm` / `claimTimeout` / `dispute`). All five are
+    used as opaque base58 strings to satisfy `new PublicKey(...)`, never
+    as a program ID — no security impact. But the literal is misleading
+    to future readers and breaks the "stale-ID grep returns zero" hygiene
+    the rest of the cleanup achieved. Recommend swapping for
+    `Keypair.generate().publicKey.toBase58()` (one-liner per test) or a
+    clearly-fixture base58 like `'1nc1nerator11111111111111111111111111111111'`.
+    Cosmetic; can be a follow-up PR.
+  - **L2. `clusterFromConnection()` substring matching is first-match-wins
+    and ambiguity-prone (pre-mainnet hardening required).** Order is
+    `localhost > devnet > testnet > mainnet`; matching is `String.includes`.
+    A URL like `https://mainnet-proxy.example.com/devnet-shadow` resolves
+    to `'devnet'`. **Currently safe** because mainnet placeholder IDs are
+    SystemProgram (`11111…1`) — any misclassification fails at instruction
+    construction with "program not executable", not silent fund loss.
+    **But this becomes load-bearing the moment M2 populates real mainnet
+    IDs.** Before the M2 mainnet deploy lands, harden cluster detection
+    by either (a) parsing URL hostname and matching against an explicit
+    allowlist, or (b) adding an explicit `cluster?: Cluster` field to
+    `AgentBazaarConfig` that overrides the URL inference. The audit team
+    (OtterSec / Neodyme) will flag this if it's still a substring match
+    on mainnet day. Track as M2 blocker.
+  - **L3. `PROGRAM_IDS` is exported as a mutable object.** Recommend
+    `Object.freeze()` on the outer record and on each `ProgramAddresses`
+    entry to prevent runtime mutation by a supply-chain-compromised
+    transitive dep. Defense-in-depth; pairs naturally with the `as const`
+    treatment Anchor IDLs already get.
+  - **L4. `DEVNET_USDC_MINT` in `escrow-utils.ts:28` is hardcoded** while
+    program IDs gained cluster-awareness. Same per-cluster table pattern
+    should be applied to USDC mint in M2 (mainnet USDC is
+    `EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v`). Currently overridable
+    via the `usdcMint` parameter on `hireAgent`, so non-blocking; track
+    as M2 follow-up alongside L2.
+  - **L5. No `CHANGELOG.md` for `@agentbazaar/sdk`.** Going `0.1.0 →
+    0.2.0` with a documented breaking change (the `deriveListingPda`
+    signature, `REGISTRY_PROGRAM_ID` removal, `UnknownClusterError`
+    throw) deserves a changelog entry. Recommend adding
+    `packages/sdk/CHANGELOG.md` with at least the 0.2.0 / 0.1.0
+    entries, then keep-a-changelog discipline going forward.
+
+**Address-correctness verification:**
+
+| Program | `program-ids.ts` (devnet) | `packages/idl/idl/bazaar_*.json` | Match |
+|---|---|---|---|
+| registry | `ADWoSmfUWLLRGMWZ61xuAMPhDgG77ziqAC5MA9voqLn3` | `ADWoSmfUWLLRGMWZ61xuAMPhDgG77ziqAC5MA9voqLn3` | ✅ |
+| escrow | `EhFptDs4mz6rt7HDmt8pB7ZogiqxUMVhpjB3NvToXxW2` | `EhFptDs4mz6rt7HDmt8pB7ZogiqxUMVhpjB3NvToXxW2` | ✅ |
+| sla | `26rhkrBkf75ijDoDuhed8m94FkuhB2MukvqtWYEDegd8` | `26rhkrBkf75ijDoDuhed8m94FkuhB2MukvqtWYEDegd8` | ✅ |
+| evaluator | `BxctnHyx9UJT7XobxHK3X548sSoPQB96Ca2fMEzYYMS8` | `BxctnHyx9UJT7XobxHK3X548sSoPQB96Ca2fMEzYYMS8` | ✅ |
+| `mainnet-beta` placeholder | `11111111111111111111111111111111` (SystemProgram) | n/a (not deployed) | ✅ discipline |
+| `testnet` placeholder | `11111111111111111111111111111111` (SystemProgram) | n/a (not deployed) | ✅ discipline |
+
+**`UnknownClusterError` shape (vs BazaarError hierarchy from PR #51):**
+- Extends `AgentBazaarError`: ✅
+- `name = new.target.name` (inherited): ✅
+- Carries `endpoint: string` field for debuggability: ✅
+- Exported from `packages/sdk/src/index.ts`: ✅
+
+**Field-rename propagation grep:**
+- `priceLamports` / `price_lamports` in `packages/sdk/`: 0 hits ✅
+- `priceLamports` / `price_lamports` in `packages/idl/`: 0 hits ✅
+- `priceLamports` / `price_lamports` in `tests/`: 0 hits ✅
+- `priceUsdcBaseUnits` total occurrences across `packages/`+`tests/`+`apps/`: 25 ✅
+
+**Out of scope for #77 — but flagged for backend-eng follow-up:**
+- `apps/indexer/src/events/on-listing-updated.ts:23,32` and
+  `apps/indexer/drizzle/0000_third_living_lightning.sql:6,17` still
+  reference SQL column `price_lamports`. The chain-side rename (PR #76)
+  and SDK-side rename (this PR) are clean; only the indexer's DB column
+  remains on the legacy name. Not a security concern (column name is
+  internal storage, no on-chain coupling) but should be tracked as a
+  Drizzle migration before any external indexer-DB consumer wires up.
+
+**Required changes before merge:** none.
+
+**Recommended follow-up PRs (post-merge, M2 readiness):**
+- L2 + L4 bundled: cluster-aware USDC mint + hardened
+  `clusterFromConnection()` (allowlist or explicit-override pattern).
+  **Pre-mainnet blocker.**
+- L1: cosmetic test-fixture cleanup.
+- L3: `Object.freeze(PROGRAM_IDS)`.
+- L5: introduce `packages/sdk/CHANGELOG.md`.
+- Indexer column rename (backend-eng): Drizzle migration
+  `price_lamports` → `price_usdc_base_units`.
