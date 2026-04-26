@@ -5321,3 +5321,68 @@ strictly. Trust boundary intact at all times.
   #83 closes the loop. Add a CI assertion (mentioned above as L1) so
   this class of cluster-mint mismatch can never silently ship again.
 
+---
+
+## PR #86 — feat(sdk): cluster hostname allowlist + USDC mint table + simulation error mapping + CHANGELOG (Task #53, M2-W1.B)
+
+**Branch:** `feature/sdk-polish-m1.5-carryforwards`
+**Verdict:** APPROVED with low-severity follow-ups
+**Diff:** +436 / -51 across 9 files (no `programs/` changes)
+
+### Scope
+
+PR closes four M1.5 carryforwards that were filed in earlier audits:
+
+- **L2 from PR #77 audit** — `clusterFromConnection()` was substring-based; spoof-able via path/query injection. PR rewrites detection to extract the URL hostname via `new URL(endpoint).hostname` and matches against a per-cluster `CLUSTER_HOSTS` regexp allowlist with a deterministic match order (`localnet → devnet → testnet → mainnet-beta`). New `{ override?: Cluster }` option lets callers skip detection (used for explicit local config).
+- **L4 from PR #77 audit** — Hardcoded `DEVNET_USDC_MINT` constant replaced by per-cluster `USDC_MINTS: Record<Cluster, PublicKey>` table and `getUsdcMint(conn)` helper. `hire.ts` now resolves the mint from the connection cluster by default. `DEVNET_USDC_MINT` kept as deprecated re-export of `USDC_MINTS.devnet` for backwards compat.
+- **L5 from PR #77 audit** — `packages/sdk/CHANGELOG.md` created with entries for 0.2.1, 0.2.0, 0.1.0 (Keep-a-Changelog format). `package.json` bumped 0.2.0 → 0.2.1.
+- **Task #51** (qa-test-eng smoke finding) — `sendWithRetry` now wraps `sendRawTransaction` in try/catch; `SendTransactionError.logs` are parsed by a new exported `mapSimulationError(logs, fallbackMessage)` for both Anchor structured logs (`Error Number: <N>`) and raw hex (`custom program error: 0x<hex>`). The 6000-based code-to-typed-exception lookup is hoisted into a shared `mapProgramCode()` so simulation and post-confirm paths use the same table.
+- **Bonus** — `packages/sdk/vitest.config.ts` added to resolve `@solana/spl-token` from the pnpm virtual store. Test count: **198 pass vs. 83 prior** — six suites were silently skipping due to the module-resolution gap.
+
+### Trust-boundary review
+
+These are **client-side SDK changes only** — no `programs/` touched, no fund-flow code, no privileged operations. Worst-case failure modes:
+
+- Bad hostname allowlist → SDK constructs instructions with wrong program IDs → tx rejected at simulation/build time (not on-chain). No fund-loss vector. (Mainnet program IDs are still placeholder `1111...` until M2 deploy, so even a perfect mainnet-spoof yields useless instructions.)
+- Missed simulation error mapping → caller catches generic `TransactionFailedError` instead of typed subclass → UX degradation, not security.
+- Wrong USDC mint resolution → SPL Token transfer would fail (mint mismatch caught by Anchor `address = USDC_MINT` constraint that PR #51/#83 added) → tx aborts. No fund movement.
+
+No admin-key, vault-PDA, or upgrade-authority surface is touched.
+
+### Findings
+
+| Sev    | ID | File:Line                                | Issue                                                                                                                                                                                                                                                                                                                                                                                                                          | Status         |
+|--------|----|------------------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|----------------|
+| Low    | L1 | `packages/sdk/src/program-ids.ts:74,83`  | The `\.devnet\.` and `\.mainnet\.` regexps are **not anchored**. A hostname such as `attacker.mainnet.evil.com` matches `mainnet-beta`; `victim.devnet.evil.com` matches `devnet`. The L2 fix from PR #77 hardened against *path*-injection but a partial *hostname*-injection vector remains. Not a fund-loss vulnerability today (mainnet IDs are placeholder; devnet attacker-RPC can't move funds), but defeats the spirit of the allowlist. **Recommend:** anchor patterns to specific suffixes — e.g. `/^[\w-]+\.devnet\.solana\.com$/`, `/^[\w-]+\.mainnet-beta\.solana\.com$/`, `/^[\w-]+\.helius-rpc\.com$/`. Or drop the broad subdomain wildcards and require callers to use `{ override }` for non-canonical RPCs. | NON-BLOCKING   |
+| Low    | L2 | `packages/sdk/vitest.config.ts:9`        | Hardcoded **absolute path** `/workspace/node_modules/.pnpm/node_modules/@solana/spl-token` will break in CI (different CWD), on contributor machines outside the devcontainer, and on Windows. Use `path.resolve(__dirname, '../../node_modules/...')` or the standard pnpm-aware vitest resolver workaround. Operational; not security per se, but blocks portability of the test harness that just unlocked 115 newly-running tests. | NON-BLOCKING   |
+| Info   | I1 | `packages/sdk/src/escrow-utils.ts:189`    | `mapSimulationError` propagates raw simulation log lines into the typed error message (`Simulation failed — program error ${code}: ${line}`). Logs may include program IDs and account addresses — **acceptable** for client-side SDK consumers (all addresses are public on-chain anyway), but worth flagging if these errors are ever forwarded to centralized logging at INFO level on the indexer/api side. No PII risk; no secret leakage. | NOTE           |
+| Info   | I2 | `packages/sdk/src/escrow-utils.ts:178-188` | If a single log array contains **both** an Anchor `Error Number: N` line and a raw `custom program error: 0x<hex>` line (rare but possible — outer + CPI), the parser returns the **first** match in iteration order. Anchor logs are typically emitted before the raw failure line, so Anchor wins, which is the desired precedence. Worth a one-line code comment to make the contract explicit. | NOTE           |
+| Info   | I3 | `packages/sdk/src/escrow-utils.ts:155-167` | Mapping table covers **3 of 11** Anchor error codes (`6000` Unauthorized, `6005` DeadlinePassed → `EscrowExpiredError`, `6006` DeadlineNotYetPassed → `EscrowNotExpiredError`). The Rust enum in `programs/bazaar-escrow/src/lib.rs:687` defines 11 variants (6000–6010). Codes 6001 (`ZeroAmount`), 6002 (`InvalidDeadline`), 6003 (`FieldTooLong`), 6004 (`InvalidStateTransition`), 6007 (`ListingMismatch`), 6008 (`TooManyTags`), 6009 (`ArithmeticOverflow`), 6010 (`InvalidScore`) all degrade to generic `TransactionFailedError`. Not security-critical (the SDK error subclasses already exist for some; e.g. `ValidationError`, `InvalidListingError`), just UX completeness. **Recommend:** track as a SDK polish ticket for M2-W2. | NOTE           |
+| Info   | I4 | (repo-wide)                                | The `vitest.config.ts` gap that silently skipped 6 SDK test suites is a class of bug worth grepping for. **Recommend:** spot-check `apps/indexer/`, `apps/api/`, `tests/e2e/`, `tests/sla/`, `tests/load/` for any vitest config that resolves to defaults and might similarly skip under module-resolution failure. The fix is to fail-loud when `import.meta.resolve` of a workspace dep fails during config load. | FOLLOW-UP      |
+
+### Cross-checks performed
+
+- ✅ Mainnet USDC address `EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v` matches Circle canonical (Circle docs + Solscan). No typo.
+- ✅ Devnet USDC address `4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU` matches Circle's devnet faucet mint (cross-checked with PR #51, PR #83, and `tests/fixtures/test-mint-authority.json` registry references).
+- ✅ Testnet/localnet placeholder is `SystemProgram` (`1111...`). An instruction built with this as a SPL Token mint would fail at the Anchor `address = USDC_MINT` constraint added in PR #51/#83 — fails loudly, no silent corruption.
+- ✅ `URL` parsing: `new URL("not a url")` throws `TypeError`; the PR catches it and falls back to a `host:port` heuristic, which then fails the regex match and propagates `UnknownClusterError`. No unhandled exception path.
+- ✅ Override option (`{ override: Cluster }`) **bypasses detection entirely** — design choice, documented in JSDoc. Acceptable for explicit local config.
+- ✅ Specific malicious URLs from the audit checklist:
+  - `https://rpc.helius.xyz/devnet/?api-key=…` → `UnknownClusterError` ✓ (test added at `tests/program-ids.test.ts:24`)
+  - `https://rpc.mainnet.helius.io/devnet-shadow?key=x` → `mainnet-beta` ✓ (test added at `tests/program-ids.test.ts:32`) — falls under L1: `\.mainnet\.` matches the hostname.
+- ✅ `hireAgent` callers can still pass an explicit `usdcMint` to override the cluster default (e.g. for synthetic-mint test fixtures) — backwards-compatible API.
+- ✅ `DEVNET_USDC_MINT` deprecated re-export still resolves to the correct mint (`USDC_MINTS.devnet`); JSDoc `@deprecated` tag present.
+- ✅ Backwards compat for `clusterFromConnection`: existing single-arg calls work unchanged; the second arg is optional.
+- ✅ No `console.log`, no secrets in code or test fixtures.
+
+### Verdict
+
+**APPROVED.** Safe to merge. None of the findings are blockers given the client-side-only scope and the absence of fund-flow vectors.
+
+**Recommended follow-ups for M2-W2:**
+
+1. Anchor the `\.devnet\.` and `\.mainnet\.` regexps to canonical suffixes (L1) — finishes the L2 hardening from PR #77 properly.
+2. Replace the absolute-path workaround in `packages/sdk/vitest.config.ts` (L2) — required for portable CI.
+3. Extend `mapProgramCode` lookup table to cover all 11 escrow error codes (I3) — complete the typed-exception surface.
+4. Repo-wide audit of vitest configs for similar silent-skip gaps (I4) — meta-fix.
+
