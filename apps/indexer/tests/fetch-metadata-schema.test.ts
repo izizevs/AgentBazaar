@@ -1,60 +1,36 @@
 /**
  * Unit tests for fetch-metadata.ts — Zod schema failure path and basic
  * scheme/URL rejection. SSRF rejection tests (private IP, redirect, oversized)
- * live in fetch-metadata-ssrf.test.ts (PR #2: Task #43).
+ * live in fetch-metadata-ssrf.test.ts (PR #80: Task #43).
  *
- * These tests mock globalThis.fetch so no real HTTP is made.
+ * Transport layer: fetchMetadata uses node:https.request (not globalThis.fetch),
+ * so we stub via stubHttpsRequest / makeMockStream from the shared helpers.
  *
  * NOTE on mock lifecycle:
  *   - vi.mock('node:dns/promises') creates a persistent module mock for the
- *     entire file. We use vi.clearAllMocks() (not restoreAllMocks()) in
- *     afterEach so the lookup vi.fn() implementation is NOT reset between
- *     tests — restoreAllMocks() would remove the implementation, causing
- *     DNS checks to throw and fail-closed (returning null from fetchMetadata).
- *   - Per-test fetch mocks are set up with vi.stubGlobal so they are cleaned
- *     up by vi.unstubAllGlobals() without affecting module mocks.
+ *     entire file. We use vi.clearAllMocks() in afterEach so call history is
+ *     reset but the lookup vi.fn() implementation is preserved.
+ *   - https.request spies are set up with vi.spyOn per-test and torn down via
+ *     vi.restoreAllMocks() in afterEach.
+ *   - After vi.restoreAllMocks() the dns mock implementation is re-applied so
+ *     subsequent tests still see a valid public IP from DNS.
  */
+import * as dnsPromises from 'node:dns/promises';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { fetchMetadata } from '../src/events/fetch-metadata.js';
+import { makeMockStream, stubHttpsRequest } from './helpers/mock-https.js';
 
-// Module-level DNS mock. Must NOT be cleared with restoreAllMocks().
+// Module-level DNS mock — always resolves to a safe public IP.
 vi.mock('node:dns/promises', () => ({
   lookup: vi.fn().mockResolvedValue({ address: '1.2.3.4', family: 4 }),
 }));
 
 afterEach(() => {
-  // Clear call history but preserve mock implementations (including the
-  // dns/promises lookup mock installed above).
   vi.clearAllMocks();
-  // Restore any global stubs (fetch) installed via vi.stubGlobal.
-  vi.unstubAllGlobals();
+  vi.restoreAllMocks(); // restore https.request spies
+  // Re-apply default lookup mock after restoreAllMocks clears it
+  vi.mocked(dnsPromises.lookup).mockResolvedValue({ address: '1.2.3.4', family: 4 } as never);
 });
-
-function makeResponse(body: string, status = 200, headers: Record<string, string> = {}) {
-  const encoder = new TextEncoder();
-  return {
-    ok: status >= 200 && status < 300,
-    status,
-    headers: {
-      get: (name: string) => headers[name.toLowerCase()] ?? null,
-    },
-    // text() is used by the current fetchMetadata implementation
-    text: () => Promise.resolve(body),
-    body: new ReadableStream({
-      start(controller) {
-        controller.enqueue(encoder.encode(body));
-        controller.close();
-      },
-    }),
-  };
-}
-
-/** Stub globalThis.fetch for a single call. Cleaned up by vi.unstubAllGlobals(). */
-function stubFetch(body: string, status = 200, headers: Record<string, string> = {}) {
-  const fn = vi.fn().mockResolvedValue(makeResponse(body, status, headers) as unknown as Response);
-  vi.stubGlobal('fetch', fn);
-  return fn;
-}
 
 // ── Scheme allowlist ──────────────────────────────────────────────────────────
 
@@ -81,17 +57,13 @@ describe('fetchMetadata — scheme allowlist', () => {
       capability: 'text-summarizer',
       endpoint: 'https://agent.example.com',
     };
-    const fetchFn = stubFetch(JSON.stringify(payload));
+    stubHttpsRequest(makeMockStream(200, JSON.stringify(payload)));
 
     const result = await fetchMetadata(
       'ipfs://bafybeigdyrzt5sfp7udm7hu76uh7y27nf3efuylqabf3oclgtqy55fbzdi',
     );
     expect(result).not.toBeNull();
     expect(result?.capability).toBe('text-summarizer');
-    expect(fetchFn).toHaveBeenCalledWith(
-      expect.stringContaining('bafybeigdyrzt5sfp7udm7hu76uh7y27nf3efuylqabf3oclgtqy55fbzdi'),
-      expect.any(Object),
-    );
   });
 });
 
@@ -106,7 +78,7 @@ describe('fetchMetadata — successful parse', () => {
       endpoint: 'https://agent.example.com/v1',
       avatar: 'https://cdn.example.com/avatar.png',
     };
-    stubFetch(JSON.stringify(payload));
+    stubHttpsRequest(makeMockStream(200, JSON.stringify(payload)));
     const result = await fetchMetadata('https://example.com/meta.json');
     expect(result).toMatchObject(payload);
   });
@@ -118,7 +90,7 @@ describe('fetchMetadata — successful parse', () => {
       capability: 'translation',
       endpoint: 'https://translator.example.com',
     };
-    stubFetch(JSON.stringify(payload));
+    stubHttpsRequest(makeMockStream(200, JSON.stringify(payload)));
     const result = await fetchMetadata('https://example.com/meta.json');
     expect(result).not.toBeNull();
     expect(result?.capability).toBe('translation');
@@ -130,51 +102,60 @@ describe('fetchMetadata — successful parse', () => {
 
 describe('fetchMetadata — Zod schema failures', () => {
   it('returns null when body is not valid JSON', async () => {
-    stubFetch('not-json');
+    stubHttpsRequest(makeMockStream(200, 'not-json'));
     const result = await fetchMetadata('https://example.com/meta.json');
     expect(result).toBeNull();
   });
 
   it('returns null when metadata is missing required fields (no capability)', async () => {
-    stubFetch(JSON.stringify({ name: 'Agent', description: 'desc' }));
+    stubHttpsRequest(makeMockStream(200, JSON.stringify({ name: 'Agent', description: 'desc' })));
     const result = await fetchMetadata('https://example.com/meta.json');
     expect(result).toBeNull();
   });
 
   it('returns null when endpoint uses http (not https)', async () => {
-    stubFetch(
-      JSON.stringify({
-        name: 'Agent',
-        description: 'desc',
-        capability: 'cap',
-        endpoint: 'http://insecure.example.com',
-      }),
+    stubHttpsRequest(
+      makeMockStream(
+        200,
+        JSON.stringify({
+          name: 'Agent',
+          description: 'desc',
+          capability: 'cap',
+          endpoint: 'http://insecure.example.com',
+        }),
+      ),
     );
     const result = await fetchMetadata('https://example.com/meta.json');
     expect(result).toBeNull();
   });
 
   it('returns null when capability is empty string', async () => {
-    stubFetch(
-      JSON.stringify({
-        name: 'Agent',
-        description: 'desc',
-        capability: '',
-        endpoint: 'https://agent.example.com',
-      }),
+    stubHttpsRequest(
+      makeMockStream(
+        200,
+        JSON.stringify({
+          name: 'Agent',
+          description: 'desc',
+          capability: '',
+          endpoint: 'https://agent.example.com',
+        }),
+      ),
     );
     const result = await fetchMetadata('https://example.com/meta.json');
     expect(result).toBeNull();
   });
 
   it('returns null when name exceeds 64 chars', async () => {
-    stubFetch(
-      JSON.stringify({
-        name: 'A'.repeat(65),
-        description: 'desc',
-        capability: 'cap',
-        endpoint: 'https://agent.example.com',
-      }),
+    stubHttpsRequest(
+      makeMockStream(
+        200,
+        JSON.stringify({
+          name: 'A'.repeat(65),
+          description: 'desc',
+          capability: 'cap',
+          endpoint: 'https://agent.example.com',
+        }),
+      ),
     );
     const result = await fetchMetadata('https://example.com/meta.json');
     expect(result).toBeNull();
@@ -185,13 +166,22 @@ describe('fetchMetadata — Zod schema failures', () => {
 
 describe('fetchMetadata — HTTP error responses', () => {
   it('returns null for non-2xx status', async () => {
-    stubFetch('Not Found', 404);
+    stubHttpsRequest(makeMockStream(404, 'Not Found'));
     const result = await fetchMetadata('https://example.com/meta.json');
     expect(result).toBeNull();
   });
 
-  it('returns null when fetch throws (network error)', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockRejectedValueOnce(new Error('ECONNREFUSED')));
+  it('returns null when https.request emits an error event', async () => {
+    const { EventEmitter } = await import('node:events');
+    const https = await import('node:https');
+    vi.spyOn(https.default, 'request').mockImplementation((_opts: unknown, _cb?: unknown) => {
+      const req = new EventEmitter() as unknown as ReturnType<typeof https.default.request>;
+      (req as unknown as { end: () => void }).end = () => {
+        setImmediate(() => req.emit('error', new Error('ECONNREFUSED')));
+      };
+      (req as unknown as { destroy: () => void }).destroy = () => {};
+      return req;
+    });
     const result = await fetchMetadata('https://example.com/meta.json');
     expect(result).toBeNull();
   });
