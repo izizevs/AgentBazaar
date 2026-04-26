@@ -1,9 +1,10 @@
 /**
- * SSRF hardening tests for fetch-metadata.ts (Task #43).
+ * SSRF hardening tests for fetch-metadata.ts (Task #43, L3 polish Task #57).
  *
  * Tests cover:
  *  - Private/loopback IP rejection (I2 DNS pinning)
  *  - H1 regression: IPv4-mapped IPv6 (::ffff:x.x.x.x), 0.0.0.0, uppercase IPv6
+ *  - L3 regression: CGNAT 100.64.0.0/10 (RFC 6598) blocked
  *  - Redirect rejection (Layer 3)
  *  - Oversized body rejection (I1 streaming cap)
  *  - DNS failure treated as blocked (fail-closed)
@@ -109,6 +110,17 @@ describe('fetchMetadata — DNS pinning (I2)', () => {
 
   it('fails closed on DNS lookup error', async () => {
     setDnsFailure();
+    expect(await fetchMetadata('https://evil.example.com/meta.json')).toBeNull();
+  });
+
+  // L3 regression tests — CGNAT 100.64.0.0/10 (RFC 6598)
+  it('rejects CGNAT address 100.64.0.1 (start of range)', async () => {
+    setDnsLookup('100.64.0.1');
+    expect(await fetchMetadata('https://evil.example.com/meta.json')).toBeNull();
+  });
+
+  it('rejects CGNAT address 100.127.255.255 (end of range)', async () => {
+    setDnsLookup('100.127.255.255');
     expect(await fetchMetadata('https://evil.example.com/meta.json')).toBeNull();
   });
 

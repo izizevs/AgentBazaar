@@ -51,7 +51,9 @@ export const serviceListings = pgTable(
     // On-chain u64 fields. bigint (int8) holds up to 2^63-1; u64 max is
     // 2^64-1. Overflow is theoretical for SATI IDs and price values in M0.
     satiAgentId: bigint('sati_agent_id', { mode: 'bigint' }).notNull(),
-    priceUsdcBaseUnits: bigint('price_lamports', { mode: 'bigint' }).notNull(),
+    // Migration #5 — renamed from price_lamports to price_usdc_base_units (Task #57).
+    // The on-chain program settled on USDC base units; the old column name was misleading.
+    priceUsdcBaseUnits: bigint('price_usdc_base_units', { mode: 'bigint' }).notNull(),
 
     // On-chain u8: 0=per_request, 1=per_job, 2=hourly, 3=subscription.
     pricingModel: integer('pricing_model').notNull(),
@@ -95,7 +97,7 @@ export const serviceListings = pgTable(
     // Exact-match index for capability_hash lookup (Discovery API filter).
     index('idx_service_listings_capability_hash').on(t.capabilityHash),
     // Composite covering index for the primary discover query:
-    // WHERE capability_hash = $1 AND is_active = true ORDER BY price_lamports
+    // WHERE capability_hash = $1 AND is_active = true ORDER BY price_usdc_base_units
     index('idx_service_listings_discover').on(t.capabilityHash, t.isActive, t.priceUsdcBaseUnits),
   ],
 );

@@ -23,53 +23,83 @@
  * L1 fix (post-audit): lookup hook now passes `result.family` instead of the
  * hardcoded `4`, correctly supporting IPv6-only resolvers.
  *
+ * L3 fix (post-audit): migrated isPrivateIp from hand-rolled regexes to ipaddr.js
+ * (battle-tested CIDR parser); added CGNAT 100.64.0.0/10 (RFC 6598) to blocklist.
+ *
  * Timeout reduced to 5 s (was 10 s) as required by Task #42 spec.
  */
 
 import type { LookupAddress, LookupOptions } from 'node:dns';
 import { lookup as dnsLookup } from 'node:dns/promises';
 import https from 'node:https';
-import { isIPv4 } from 'node:net';
 import type { Metadata } from '@agentbazaar/idl';
 import { MetadataSchema } from '@agentbazaar/idl';
+import * as ipaddr from 'ipaddr.js';
 import { logger } from '../logger.js';
 import { safeLogUrl } from '../util/safe-log-url.js';
 
 const MAX_RESPONSE_BYTES = 100_000;
 const TIMEOUT_MS = 5_000;
 
-// RFC 1918 + loopback + link-local + cloud metadata — blocked to prevent SSRF
-// against internal services (169.254.169.254 cloud metadata endpoint, etc.).
-const PRIVATE_IPV4 = [
-  /^127\./, // 127.0.0.0/8  loopback
-  /^10\./, // 10.0.0.0/8   RFC 1918
-  /^192\.168\./, // 192.168.0.0/16 RFC 1918
-  /^172\.(1[6-9]|2\d|3[01])\./, // 172.16.0.0/12 RFC 1918
-  /^169\.254\./, // 169.254.0.0/16 link-local / cloud metadata
-];
-
+/**
+ * L3 fix: migrate to ipaddr.js for IP range parsing.
+ *
+ * ipaddr.js is a battle-tested library used by major proxies; it handles all
+ * edge cases around IPv4-mapped IPv6 unwrapping, CIDR range membership, and
+ * normalisation automatically — removing the need for hand-rolled regexes.
+ *
+ * Blocked ranges:
+ *  - loopback          (127.0.0.0/8, ::1)
+ *  - RFC 1918 private  (10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16)
+ *  - link-local        (169.254.0.0/16, fe80::/10) — includes cloud metadata
+ *  - unique-local IPv6 (fc00::/7)
+ *  - multicast         (224.0.0.0/4, ff00::/8)
+ *  - unspecified       (0.0.0.0, ::)
+ *  - CGNAT             (100.64.0.0/10 — RFC 6598; added for completeness per L3 audit note)
+ *
+ * ipaddr.js range() returns named strings for well-known ranges and
+ * 'unicast' for public addresses. We block anything that is NOT unicast
+ * (after unwrapping IPv4-in-IPv6 to its IPv4 representation).
+ */
 function isPrivateIp(address: string): boolean {
-  // Normalise to lowercase so uppercase IPv6 literals don't slip through.
-  let addr = address.toLowerCase();
-
-  // Unwrap IPv4-mapped IPv6 (::ffff:x.x.x.x) so the IPv4 blocklist applies.
-  // Without this, ::ffff:169.254.169.254 bypasses the PRIVATE_IPV4 regexes.
-  if (addr.startsWith('::ffff:')) {
-    const tail = addr.slice('::ffff:'.length);
-    if (isIPv4(tail)) addr = tail;
+  let parsed: ipaddr.IPv4 | ipaddr.IPv6;
+  try {
+    parsed = ipaddr.parse(address);
+  } catch {
+    // Unparseable address → fail-closed.
+    return true;
   }
 
-  // Unspecified addresses — block both forms.
-  if (addr === '0.0.0.0' || addr === '::') return true;
+  // Unwrap IPv4-mapped IPv6 (::ffff:x.x.x.x) so IPv4 range checks apply.
+  // Without this, ::ffff:169.254.169.254 would be classified as ipv4Mapped
+  // rather than linkLocal — the blocklist covers both, but unwrapping is
+  // cleaner and ensures future IPv4-range additions are automatically covered.
+  if (parsed.kind() === 'ipv6') {
+    const v6 = parsed as ipaddr.IPv6;
+    if (v6.isIPv4MappedAddress()) {
+      parsed = v6.toIPv4Address();
+    }
+  }
 
-  return (
-    PRIVATE_IPV4.some((re) => re.test(addr)) ||
-    addr === '::1' || // IPv6 loopback
-    addr.startsWith('fe80:') || // fe80::/10 link-local
-    addr.startsWith('fc') || // fc00::/7 unique-local
-    addr.startsWith('fd') || // fc00::/7 unique-local (fd prefix)
-    addr.startsWith('ff') // ff00::/8 multicast
-  );
+  const range = parsed.range();
+
+  // ipaddr.js built-in range names that indicate non-public addresses.
+  const BLOCKED_RANGES = new Set([
+    'unspecified', // 0.0.0.0 / ::
+    'loopback', // 127.0.0.0/8 / ::1
+    'private', // 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16
+    'linkLocal', // 169.254.0.0/16 (cloud metadata!) / fe80::/10
+    'uniqueLocal', // fc00::/7
+    'multicast', // 224.0.0.0/4 / ff00::/8
+    'ipv4Mapped', // remaining ::ffff:x.x.x.x forms (after partial unwrap)
+    'rfc6145', // IPv4-translated IPv6 (::ffff:0:x.x.x.x)
+    'rfc6052', // IPv4/IPv6 translation (64:ff9b::/96)
+    'teredo', // 2001::/32
+    'carrierGradeNat', // 100.64.0.0/10 — CGNAT (RFC 6598)
+    '6to4', // 2002::/16
+  ]);
+
+  return BLOCKED_RANGES.has(range);
 }
 
 // Returns null for non-https://, non-ipfs:// schemes or invalid CIDs.
@@ -127,10 +157,10 @@ async function httpsGetPinned(url: string): Promise<{
   statusCode: number;
   stream: NodeJS.ReadableStream;
 } | null> {
-  const parsed = new URL(url);
-  const hostname = parsed.hostname;
-  const port = parsed.port ? Number(parsed.port) : 443;
-  const path = parsed.pathname + parsed.search;
+  const parsedUrl = new URL(url);
+  const hostname = parsedUrl.hostname;
+  const port = parsedUrl.port ? Number(parsedUrl.port) : 443;
+  const path = parsedUrl.pathname + parsedUrl.search;
 
   // Step 1: Resolve + validate once.
   let resolvedIp: string;

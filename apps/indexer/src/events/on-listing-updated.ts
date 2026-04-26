@@ -20,18 +20,18 @@ export async function onListingUpdated(
   if (newPrice != null && newUri != null) {
     await sql`
       UPDATE service_listings
-      SET price_lamports = ${newPrice},
-          metadata_uri   = ${newUri},
-          is_active      = ${isActive},
-          updated_at     = ${updatedAt}
+      SET price_usdc_base_units = ${newPrice},
+          metadata_uri          = ${newUri},
+          is_active             = ${isActive},
+          updated_at            = ${updatedAt}
       WHERE pubkey = ${pubkey}
     `;
   } else if (newPrice != null) {
     await sql`
       UPDATE service_listings
-      SET price_lamports = ${newPrice},
-          is_active      = ${isActive},
-          updated_at     = ${updatedAt}
+      SET price_usdc_base_units = ${newPrice},
+          is_active             = ${isActive},
+          updated_at            = ${updatedAt}
       WHERE pubkey = ${pubkey}
     `;
   } else if (newUri != null) {

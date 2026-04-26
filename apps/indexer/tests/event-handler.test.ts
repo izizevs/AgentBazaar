@@ -72,7 +72,7 @@ describe.skipIf(!dbUrl)('POST /webhooks/helius — event handler', () => {
 
     await sql`
       INSERT INTO service_listings (
-        pubkey, owner, capability_hash, sati_agent_id, price_lamports,
+        pubkey, owner, capability_hash, sati_agent_id, price_usdc_base_units,
         pricing_model, sla_params, metadata_uri, is_active, jobs_completed,
         created_at, updated_at
       ) VALUES (

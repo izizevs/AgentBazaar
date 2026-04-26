@@ -46,8 +46,21 @@ export function startRetentionCron(intervalMs: number): () => void {
     return () => {};
   }
 
-  // Run once 60 s after startup so any backlog is cleared on deploy
-  // without delaying the first request.
+  // Dual-timer design rationale:
+  //
+  //  ┌─ setTimeout(60 s) ─────────────────────────────────────────────────────┐
+  //  │  Fires once, 60 s after startup, to clear any backlog that accumulated │
+  //  │  while the indexer was down — without blocking the first webhook.       │
+  //  └────────────────────────────────────────────────────────────────────────┘
+  //  ┌─ setInterval(intervalMs) ──────────────────────────────────────────────┐
+  //  │  Fires on a repeating schedule (default 24 h) for ongoing housekeeping.│
+  //  └────────────────────────────────────────────────────────────────────────┘
+  //
+  //  ⚠ WARNING — sub-minute intervals: if intervalMs < 60 000 ms the first
+  //  setInterval tick lands WITHIN the same minute as the initial setTimeout.
+  //  Both fire within seconds of each other, creating a burst of back-to-back
+  //  cleanup queries. This is why RETENTION_INTERVAL_MS is validated to be
+  //  0 (disabled) or >= 60 000 ms in env.ts.
   const initialDelay = setTimeout(() => {
     runRetentionCleanup().catch((err) =>
       logger.error({ err }, 'retention: initial cleanup failed'),

@@ -18,7 +18,14 @@ const EnvSchema = z.object({
   PINATA_GATEWAY: z.string().url().optional(),
   // TTL retention cron interval in milliseconds.
   // Defaults to 86 400 000 (24 h). Set to 0 to disable cron (useful in tests).
-  RETENTION_INTERVAL_MS: z.coerce.number().int().min(0).default(86_400_000),
+  // Values between 1 and 59 999 ms would trigger a cron storm (initial 60 s delay
+  // + interval both fire within a minute). Use 0 to disable or >= 60 000 ms.
+  RETENTION_INTERVAL_MS: z.coerce
+    .number()
+    .int()
+    .min(0)
+    .refine((v) => v === 0 || v >= 60_000, 'must be 0 (disabled) or >= 60_000 ms')
+    .default(86_400_000),
 });
 
 type Env = z.infer<typeof EnvSchema>;

@@ -9,7 +9,8 @@ const EXPECTED_COLUMNS = [
   'owner',
   'capability_hash',
   'sati_agent_id',
-  'price_lamports',
+  // Renamed from price_lamports → price_usdc_base_units in migration #5 (Task #57).
+  'price_usdc_base_units',
   'pricing_model',
   'sla_params',
   'metadata_uri',

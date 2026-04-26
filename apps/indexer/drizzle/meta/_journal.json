@@ -36,6 +36,13 @@
       "when": 1777179723615,
       "tag": "0004_short_vertigo",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1777200000000,
+      "tag": "0005_rename_price_column",
+      "breakpoints": true
     }
   ]
 }
