@@ -17,16 +17,47 @@ describe('clusterFromConnection', () => {
     expect(clusterFromConnection(conn('https://api.devnet.solana.com'))).toBe('devnet');
   });
 
-  it('returns devnet for Helius devnet endpoint', () => {
+  it('returns devnet for Helius devnet endpoint (hostname devnet.helius-rpc.com)', () => {
     expect(clusterFromConnection(conn('https://devnet.helius-rpc.com/?api-key=abc123'))).toBe(
       'devnet',
     );
   });
 
-  it('returns devnet for Helius mainnet-style URL that contains "devnet" in path', () => {
-    expect(clusterFromConnection(conn('https://rpc.helius.xyz/devnet/?api-key=abc123'))).toBe(
-      'devnet',
+  // L2 security fix: hostname-based detection prevents path/query injection.
+  // rpc.helius.xyz/devnet should throw because the hostname "rpc.helius.xyz" is unknown —
+  // the "devnet" in the path no longer tricks cluster detection.
+  it('throws UnknownClusterError for mainnet proxy URL with "devnet" in path (hostname allowlist fix)', () => {
+    expect(() =>
+      clusterFromConnection(conn('https://rpc.helius.xyz/devnet/?api-key=abc123')),
+    ).toThrowError(UnknownClusterError);
+  });
+
+  // Critical security regression: with strict allowlist anchoring, an unknown
+  // hostname (even one containing "mainnet" or "devnet" in a subdomain) must
+  // reject — only canonical Solana / Helius / Project Serum hostnames count.
+  it('throws UnknownClusterError for an attacker subdomain containing "mainnet"', () => {
+    expect(() =>
+      clusterFromConnection(conn('https://rpc.mainnet.helius.io/devnet-shadow?key=x')),
+    ).toThrowError(UnknownClusterError);
+  });
+
+  it('throws UnknownClusterError for attacker.mainnet.evil.com (auditor finding L1)', () => {
+    expect(() => clusterFromConnection(conn('https://attacker.mainnet.evil.com'))).toThrowError(
+      UnknownClusterError,
     );
+  });
+
+  it('throws UnknownClusterError for victim.devnet.evil.com (auditor finding L1)', () => {
+    expect(() => clusterFromConnection(conn('https://victim.devnet.evil.com'))).toThrowError(
+      UnknownClusterError,
+    );
+  });
+
+  // Ensure a URL with "devnet" only in the query string still resolves via hostname
+  it('throws UnknownClusterError when "devnet" appears only in query string', () => {
+    expect(() =>
+      clusterFromConnection(conn('https://unknown-rpc.acme.io/?cluster=devnet')),
+    ).toThrowError(UnknownClusterError);
   });
 
   it('returns localnet for localhost', () => {
@@ -45,7 +76,7 @@ describe('clusterFromConnection', () => {
     expect(clusterFromConnection(conn('https://api.mainnet-beta.solana.com'))).toBe('mainnet-beta');
   });
 
-  it('returns mainnet-beta for an endpoint containing "mainnet"', () => {
+  it('returns mainnet-beta for mainnet.helius-rpc.com', () => {
     expect(clusterFromConnection(conn('https://mainnet.helius-rpc.com/?api-key=abc'))).toBe(
       'mainnet-beta',
     );
@@ -69,6 +100,21 @@ describe('clusterFromConnection', () => {
     }
     expect(thrown).toBeInstanceOf(UnknownClusterError);
     expect(thrown?.endpoint).toBe(endpoint);
+  });
+
+  // ─── override option ──────────────────────────────────────────────────────────
+
+  it('returns the override cluster without inspecting the endpoint', () => {
+    // endpoint would normally throw — but override skips detection entirely
+    expect(
+      clusterFromConnection(conn('https://unknown-rpc.example.com'), { override: 'devnet' }),
+    ).toBe('devnet');
+  });
+
+  it('override works for mainnet-beta', () => {
+    expect(clusterFromConnection(conn('http://localhost:8899'), { override: 'mainnet-beta' })).toBe(
+      'mainnet-beta',
+    );
   });
 });
 

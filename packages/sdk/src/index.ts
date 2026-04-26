@@ -26,7 +26,12 @@ export {
   ValidationError,
   WalletNotConnectedError,
 } from './errors.js';
-export type { Cluster, ProgramAddresses } from './program-ids.js';
+export {
+  DEVNET_USDC_MINT,
+  getUsdcMint,
+  USDC_MINTS,
+} from './escrow-utils.js';
+export type { Cluster, ClusterFromConnectionOptions, ProgramAddresses } from './program-ids.js';
 export { clusterFromConnection, PROGRAM_IDS } from './program-ids.js';
 export type {
   ConfirmInput,

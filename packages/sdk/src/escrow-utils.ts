@@ -6,6 +6,7 @@ import {
   ComputeBudgetProgram,
   type Connection,
   PublicKey,
+  SendTransactionError,
   Transaction,
   type TransactionInstruction,
 } from '@solana/web3.js';
@@ -16,7 +17,7 @@ import {
   TransactionFailedError,
   UnauthorizedError,
 } from './errors.js';
-import { clusterFromConnection, PROGRAM_IDS } from './program-ids.js';
+import { type Cluster, clusterFromConnection, PROGRAM_IDS } from './program-ids.js';
 
 export { TOKEN_PROGRAM_ID };
 
@@ -25,7 +26,39 @@ export function getEscrowProgramId(connection: Connection): PublicKey {
   return PROGRAM_IDS[clusterFromConnection(connection)].escrow;
 }
 
-export const DEVNET_USDC_MINT = new PublicKey('4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU');
+/**
+ * Per-cluster USDC mint addresses.
+ *
+ * - `mainnet-beta`: Circle's canonical mainnet USDC mint
+ * - `devnet`: Circle's canonical devnet USDC faucet mint
+ * - `testnet` / `localnet`: placeholder (SystemProgram ID) — not deployed; caller
+ *   must supply the mint address directly when testing on these clusters.
+ */
+export const USDC_MINTS: Record<Cluster, PublicKey> = {
+  'mainnet-beta': new PublicKey('EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v'),
+  devnet: new PublicKey('4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU'),
+  testnet: new PublicKey('11111111111111111111111111111111'), // not deployed
+  localnet: new PublicKey('11111111111111111111111111111111'), // user-supplied locally
+};
+
+/**
+ * Returns the canonical USDC mint for the cluster inferred from `connection`.
+ *
+ * For `testnet` and `localnet` the returned value is `SystemProgram` (11111…)
+ * because USDC is not deployed there — callers that target those clusters must
+ * supply their own test-mint address.
+ */
+export function getUsdcMint(connection: Connection): PublicKey {
+  return USDC_MINTS[clusterFromConnection(connection)];
+}
+
+/**
+ * @deprecated Use {@link getUsdcMint} or {@link USDC_MINTS} for cluster-aware access.
+ *
+ * Kept for backwards compatibility with code that imported `DEVNET_USDC_MINT` directly
+ * before the per-cluster table was introduced (Task #53, 0.2.1).
+ */
+export const DEVNET_USDC_MINT = USDC_MINTS.devnet;
 
 export const RETRY_PRIORITY_FEES = [0, 100_000, 500_000] as const;
 
@@ -61,7 +94,22 @@ export async function sendWithRetry(
       }
       tx.add(ix);
       const signed = await wallet.signTransaction(tx);
-      const signature = await connection.sendRawTransaction(signed.serialize());
+
+      let signature: string;
+      try {
+        signature = await connection.sendRawTransaction(signed.serialize());
+      } catch (sendErr) {
+        // sendRawTransaction throws SendTransactionError when the node rejects the tx
+        // pre-flight (simulation). Map simulation program errors to typed exceptions so
+        // callers get the same typed-error experience as post-confirm errors.
+        if (sendErr instanceof SendTransactionError) {
+          const logs = sendErr.logs ?? [];
+          const mapped = mapSimulationError(logs, sendErr.message);
+          throw mapped;
+        }
+        throw sendErr;
+      }
+
       const result = await connection.confirmTransaction(
         { signature, blockhash, lastValidBlockHeight },
         'confirmed',
@@ -95,22 +143,61 @@ function isTransient(err: unknown): boolean {
   return true;
 }
 
+/**
+ * Map a numeric Anchor/program error code to a typed SDK exception.
+ *
+ * This lookup table is shared by both `mapConfirmError` (post-confirm errors from
+ * `confirmTransaction`) and `mapSimulationError` (pre-flight errors from
+ * `sendRawTransaction`/`SendTransactionError`).
+ *
+ * Codes 6000–6010 match the bazaar-escrow program's custom error enum.
+ */
+function mapProgramCode(code: number, msg: string, signature?: string): Error {
+  switch (code) {
+    case 6000:
+      return new UnauthorizedError(msg);
+    case 6005:
+      return new EscrowExpiredError(msg);
+    case 6006:
+      return new EscrowNotExpiredError(msg);
+    default:
+      return new TransactionFailedError(msg, signature);
+  }
+}
+
 function mapConfirmError(err: unknown, signature: string): Error {
   const code = extractCustomErrorCode(err);
   if (code !== undefined) {
     const msg = `Program error ${code}: ${JSON.stringify(err)}`;
-    switch (code) {
-      case 6000:
-        return new UnauthorizedError(msg);
-      case 6005:
-        return new EscrowExpiredError(msg);
-      case 6006:
-        return new EscrowNotExpiredError(msg);
-      default:
-        return new TransactionFailedError(msg, signature);
-    }
+    return mapProgramCode(code, msg, signature);
   }
   return new TransactionFailedError(`Program error: ${JSON.stringify(err)}`, signature);
+}
+
+/**
+ * Parse simulation logs from a `SendTransactionError` and map any Anchor / custom
+ * program error to a typed exception.
+ *
+ * Log formats handled:
+ * 1. Anchor: `Program log: AnchorError occurred. Error Code: <Name>. Error Number: <N>.`
+ * 2. Raw:    `Program <ID> failed: custom program error: 0x<hex>`
+ */
+export function mapSimulationError(logs: string[], fallbackMessage: string): Error {
+  for (const line of logs) {
+    // Anchor structured error log
+    const anchorMatch = line.match(/Error Number:\s*(\d+)/);
+    if (anchorMatch) {
+      const code = Number(anchorMatch[1]);
+      return mapProgramCode(code, `Simulation failed — program error ${code}: ${line}`);
+    }
+    // Raw custom program error (hex)
+    const rawMatch = line.match(/custom program error:\s*0x([0-9a-fA-F]+)/);
+    if (rawMatch?.[1] !== undefined) {
+      const code = Number.parseInt(rawMatch[1], 16);
+      return mapProgramCode(code, `Simulation failed — program error ${code}: ${line}`);
+    }
+  }
+  return new TransactionFailedError(`Simulation failed: ${fallbackMessage}`);
 }
 
 function extractCustomErrorCode(err: unknown): number | undefined {

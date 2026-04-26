@@ -10,9 +10,9 @@ import {
   ValidationError,
 } from './errors.js';
 import {
-  DEVNET_USDC_MINT,
   getAssociatedTokenAddress,
   getEscrowProgramId,
+  getUsdcMint,
   makeEscrowProgram,
   sendWithRetry,
 } from './escrow-utils.js';
@@ -36,8 +36,11 @@ export async function hireAgent(
   wallet: AnchorWallet,
   agentId: string,
   input: HireInput,
-  usdcMint: PublicKey = DEVNET_USDC_MINT,
+  usdcMint?: PublicKey,
 ): Promise<EscrowHandle> {
+  // Default to the cluster-aware USDC mint derived from the connection endpoint.
+  // Callers may pass an explicit mint to override (e.g. custom localnet test mint).
+  const resolvedUsdcMint = usdcMint ?? getUsdcMint(connection);
   const parsed = HireInputSchema.safeParse(input);
   if (!parsed.success) throw new ValidationError(parsed.error.message);
 
@@ -73,7 +76,7 @@ export async function hireAgent(
     return { escrowPda, vaultPda, signature: '' };
   }
 
-  const buyerTokenAccount = getAssociatedTokenAddress(usdcMint, wallet.publicKey);
+  const buyerTokenAccount = getAssociatedTokenAddress(resolvedUsdcMint, wallet.publicKey);
 
   const tokenBalance = await connection.getTokenAccountBalance(buyerTokenAccount);
   const available = BigInt(tokenBalance.value.amount);
