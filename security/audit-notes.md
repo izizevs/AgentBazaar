@@ -4958,3 +4958,178 @@ breaking-change blast radius for `tests/helpers/tx-utils.ts`.
 - L5: introduce `packages/sdk/CHANGELOG.md`.
 - Indexer column rename (backend-eng): Drizzle migration
   `price_lamports` → `price_usdc_base_units`.
+
+---
+
+## PR #79 — feature/backend-m15-metadata-ttl — 2026-04-26
+**Verdict:** APPROVED (in isolation, no blocking findings)
+
+**Tasks closed:** #42 (metadata JSONB column + persistence), #44 (TTL retention cron for processed_signatures).
+
+**Scope of review:**
+- `apps/indexer/drizzle/0004_short_vertigo.sql` (`ALTER TABLE service_listings ADD COLUMN metadata jsonb`)
+- `apps/indexer/src/db/schema.ts` (jsonb `metadata` column)
+- `apps/indexer/src/cron/retention.ts` (new — `runRetentionCleanup` + `startRetentionCron`)
+- `apps/indexer/src/env.ts` (`RETENTION_INTERVAL_MS`)
+- `apps/indexer/src/index.ts` (cron wiring)
+- `apps/indexer/src/events/on-listing-created.ts` + `on-listing-updated.ts` (metadata persistence)
+- `apps/indexer/tests/fetch-metadata-schema.test.ts` (13 unit tests; later rewritten in PR #80 H2 fix)
+- `apps/indexer/tests/retention.test.ts` (timer wiring + DB integration)
+
+**Findings:**
+
+- **Critical / High / Medium:** none.
+
+- **Low:**
+  - **L1.** `RETENTION_INTERVAL_MS` schema has no `.min()` floor. Operator typo of `1` (intent: `1` hour as `3_600_000`) → cron fires every 1 ms → log storm + DB connection-pool churn. Recommend `.min(60_000)` on the Zod schema, or document the intended unit. Operational, not security.
+  - **L2.** `startRetentionCron` schedules a one-shot `setTimeout(60_000)` AND a `setInterval(intervalMs)` — these run on independent timers. With 24 h default the gap is fine; if a future load test sets `intervalMs = 60_000`, the initial timeout and the first interval fire ~together. Add `Math.max(intervalMs, 60_000)` or document the intended cadence.
+
+- **Cross-PR coordination (resolved in PR #80 fixup).**
+  This PR's `apps/indexer/tests/fetch-metadata-schema.test.ts` mocked `globalThis.fetch`. PR #80 (`feature/backend-m15-ssrf-hardening`) rewrote `fetch-metadata.ts` to use `node:https.request`. When both PRs landed together, 10/13 schema tests timed out (verified: 50 s vs 233 ms). Backend-eng's PR #80 fixup commit `4866e14` rewrote the schema test to use a shared `tests/helpers/mock-https.ts` module, eliminating the collision. CI green after fixup.
+
+**SQL safety verification:**
+- Cron DELETE uses `${cutoff}` as a JS Date bind parameter — postgres.js parameterises it as `timestamp with time zone`. No raw SQL interpolation. ✅
+- `metadata = ${JSON.stringify(metadata)}` matches the existing `slaParams` pattern (PR #11) — postgres.js implicitly casts string to jsonb. ✅
+- Migration 0004 is `ADD COLUMN ... jsonb` (nullable, no default) — no table rewrite, safe on production-sized tables. ✅
+
+**Required changes before merge:** none.
+**Status:** Merged as commit `c88e51d`.
+
+---
+
+## PR #80 — feature/backend-m15-ssrf-hardening — 2026-04-26
+**Verdict:** APPROVED (after re-audit of fixup commit `4866e14`)
+**Iteration count:** 2 (initial review NEEDS_CHANGES → fixup → APPROVED).
+
+**Task closed:** #43 (SSRF hardening — I1 streaming cap + I2 DNS pinning).
+
+**Scope of review:**
+- `apps/indexer/src/events/fetch-metadata.ts` (rewrite: `httpsGetPinned()` + `readBodyWithLimit()` replace `fetch()` + `res.text()`)
+- `apps/indexer/tests/fetch-metadata-ssrf.test.ts` (new — 19 SSRF tests, +4 H1 regression tests post-fixup)
+- `apps/indexer/tests/fetch-metadata-schema.test.ts` (rewritten in fixup to use shared helpers)
+- `apps/indexer/tests/helpers/mock-https.ts` (new — shared `stubHttpsRequest` / `makeMockStream`)
+
+### Iteration 1 — initial review (NEEDS_CHANGES)
+
+Two High findings blocked merge:
+
+- **H1 — IPv4-mapped IPv6 SSRF bypass.** `isPrivateIp()` did string-prefix
+  matching on raw addresses without normalising `::ffff:x.x.x.x`. Verified
+  via extracted-function probe set:
+  ```
+  isPrivateIp(::ffff:127.0.0.1)        = false   ❌ loopback bypass
+  isPrivateIp(::ffff:169.254.169.254)  = false   ❌ EC2 cloud metadata bypass
+  isPrivateIp(0.0.0.0)                 = false   ❌ Linux routes to localhost
+  ```
+  Attacker controlling DNS for `evil.example.com` could publish
+  `AAAA ::ffff:169.254.169.254` → on dual-stack indexer host, dns.lookup
+  returns mapped form → blocklist misses → indexer connects to EC2/GCP
+  metadata service and exfiltrates IAM token via 100 KB-capped response.
+
+- **H2 — Cross-PR test collision with PR #79.** Verified by running both
+  PRs together: 10/13 tests in `fetch-metadata-schema.test.ts` timed out
+  (50 s vs 233 ms standalone). PR #79's schema test stubbed
+  `globalThis.fetch`; PR #80 switched implementation to
+  `node:https.request`. Stub became no-op; real https.request hit 5 s
+  timeout against DNS-mocked `1.2.3.4`.
+
+Plus L1 (lookup hook hardcoded `family = 4` instead of result.family).
+
+### Iteration 2 — re-audit of fixup `4866e14`
+
+**H1 fix verified:** post-fixup `isPrivateIp` lowercases address, unwraps
+`::ffff:` via `node:net.isIPv4()`, blocks `0.0.0.0` / `::`, adds
+`startsWith('ff')` for IPv6 multicast `ff00::/8`. Re-ran the same probe
+set + 4 new probes:
+
+```
+✓ isPrivateIp(::ffff:127.0.0.1            ) = true   (want true)
+✓ isPrivateIp(::ffff:10.0.0.1             ) = true   (want true)
+✓ isPrivateIp(::ffff:169.254.169.254      ) = true   (want true)
+✓ isPrivateIp(0.0.0.0                     ) = true   (want true)
+✓ isPrivateIp(::                          ) = true   (want true)
+✓ isPrivateIp(FE80::1                     ) = true   (want true)  ← uppercase
+✓ isPrivateIp(Fc00::1                     ) = true   (want true)  ← mixed case
+✓ isPrivateIp(ff02::1                     ) = true   (want true)  ← multicast
+✓ isPrivateIp(1.2.3.4                     ) = false  (want false)
+✓ isPrivateIp(8.8.8.8                     ) = false  (want false)
+✓ isPrivateIp(2606:4700:4700::1111        ) = false  (want false) ← public IPv6
+✓ isPrivateIp(100.64.0.1                  ) = false  (want false) ← CGNAT (see L3)
+12 pass / 0 fail
+```
+
+PR's own `fetch-metadata-ssrf.test.ts` adds 4 H1 regression tests:
+`::ffff:127.0.0.1`, `::ffff:169.254.169.254`, `0.0.0.0`, uppercase
+`FE80::1`. All pass.
+
+**H2 fix verified:** schema test rewritten to import
+`stubHttpsRequest` + `makeMockStream` from new
+`tests/helpers/mock-https.ts`. Full indexer vitest run:
+
+```
+Test Files  11 passed | 2 skipped (13)
+     Tests  86 passed | 14 skipped (100)
+   Duration  525 ms
+```
+
+(vs 50 s pre-fixup with 10 timeouts.) ✅
+
+**L1 fix verified:** `lookup` hook now passes `resolvedFamily` from the
+dnsLookup result (line 159) instead of hardcoded `4`. IPv6-only
+resolvers will now work correctly.
+
+**DNS pinning architecture re-verified race-free:**
+1. `dnsLookup(hostname)` runs once, captures `resolvedIp` + `resolvedFamily` in closure.
+2. `isPrivateIp(resolvedIp)` validates against the strengthened blocklist.
+3. `https.Agent({ lookup })` hook is a closure that ignores its `_host` argument and unconditionally returns `(null, resolvedIp, resolvedFamily)` — no second OS resolver call.
+4. `https.request({ hostname: resolvedIp, agent, servername: hostname })` uses the validated IP literal as connection target. Defense-in-depth: even if Node bypassed the lookup hook for IP-literal hostnames, the IP pin still holds.
+
+No race window between validation and TCP connect. ✅
+
+**TLS cert validation preserved:**
+- `servername: hostname` (original DNS name) → SNI uses the name, not the IP. ✅
+- `rejectUnauthorized: true` → cert chain + name validation against `servername`. ✅
+- `Host: hostname` header → HTTP-layer virtual-host routing intact. ✅
+
+### Findings (post-fixup)
+
+- **Critical / High / Medium:** none.
+
+- **Low:**
+  - **L3.** CGNAT range `100.64.0.0/10` (RFC 6598) is not in the v4
+    blocklist. An attacker on a CGNAT'd ISP could not pivot to
+    AgentBazaar internal infra via this, but for paranoid completeness
+    (and to match audit-team expectations on mainnet day) consider
+    adding `/^100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\./`. Lower priority
+    than H1 because cloud metadata services don't live in CGNAT space.
+  - **L4 (defense-in-depth).** Consider migrating to `ipaddr.js` and
+    using `ipaddr.parse(addr).range()` for the SSRF blocklist. Returns
+    named ranges (`loopback`, `private`, `linkLocal`, `uniqueLocal`,
+    `multicast`, `reserved`, `unspecified`, `carrierGradeNat`, etc.),
+    eliminates the regex/prefix-match maintenance burden, and is what
+    OtterSec / Neodyme will recommend on mainnet day. Track as M2
+    follow-up alongside the SDK cluster-detection hardening (PR #77 L2).
+
+### Test plan re-execution
+
+| Check | Pre-fixup | Post-fixup |
+|---|---|---|
+| H1 IP probe (8 positives + 4 negatives) | 4/12 ❌ | 12/12 ✅ |
+| `pnpm -F @agentbazaar/indexer test` | 10 timeouts in 50 s ❌ | 86 pass / 14 skip in 525 ms ✅ |
+| TLS SNI / cert validation | ✅ unchanged | ✅ unchanged |
+| DNS pinning race-free | ✅ unchanged | ✅ unchanged |
+
+**Required changes before merge:** none.
+
+### Notes for the external audit team (OtterSec / Neodyme)
+
+- `apps/indexer/src/events/fetch-metadata.ts` is the only outbound
+  HTTP-from-private-network surface in the indexer. Worth a focused
+  pass on mainnet day: SSRF mitigations rest on `node:net.isIPv4` +
+  `String.startsWith` prefix matching. The L4 follow-up (migrate to
+  `ipaddr.js`) would eliminate the foot-gun of someone adding a new
+  range with a typo'd regex.
+- DNS pinning relies on Node's `https.Agent.lookup` hook semantics. If
+  Node ever changes hook contract (e.g., adds a fallback OS-resolver
+  call), this defense degrades. Pin Node version range in
+  `apps/indexer/package.json` engines field as part of M2 prep.
