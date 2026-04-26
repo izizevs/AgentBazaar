@@ -16,6 +16,9 @@ const EnvSchema = z.object({
   // Optional Pinata IPFS gateway (e.g. https://your-subdomain.mypinata.cloud/ipfs).
   // Falls back to https://ipfs.io/ipfs when unset.
   PINATA_GATEWAY: z.string().url().optional(),
+  // TTL retention cron interval in milliseconds.
+  // Defaults to 86 400 000 (24 h). Set to 0 to disable cron (useful in tests).
+  RETENTION_INTERVAL_MS: z.coerce.number().int().min(0).default(86_400_000),
 });
 
 type Env = z.infer<typeof EnvSchema>;

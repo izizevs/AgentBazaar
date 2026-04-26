@@ -84,6 +84,12 @@ export const serviceListings = pgTable(
 
     // Agent endpoint URL from IPFS metadata. Nullable — not all listings expose one in M0.
     endpoint: text('endpoint'),
+
+    // Full validated metadata JSON blob from IPFS (Migration #4 — Task #42).
+    // Nullable until the handler processes the creation event and fetches metadata.
+    // Stored as-is from MetadataSchema.parse() so the Discovery API can return it without
+    // re-parsing. Future full-text search can index metadata->>'description'.
+    metadata: jsonb('metadata'),
   },
   (t) => [
     // Exact-match index for capability_hash lookup (Discovery API filter).

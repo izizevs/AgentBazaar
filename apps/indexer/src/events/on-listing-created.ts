@@ -49,14 +49,15 @@ export async function onListingCreated(
     ON CONFLICT (pubkey) DO NOTHING
   `;
 
-  // Best-effort IPFS metadata fetch to populate capability + endpoint.
-  // Failure leaves columns null; they can be backfilled later.
+  // Best-effort IPFS metadata fetch to populate capability, endpoint, and full metadata blob.
+  // Failure leaves columns null; they can be backfilled later by re-indexing.
   const metadata = await fetchMetadata(metadataUri);
   if (metadata) {
     await sql`
       UPDATE service_listings
       SET capability = ${metadata.capability},
           endpoint   = ${metadata.endpoint},
+          metadata   = ${JSON.stringify(metadata)},
           updated_at = now()
       WHERE pubkey = ${pubkey}
     `;

@@ -51,7 +51,7 @@ export async function onListingUpdated(
     `;
   }
 
-  // Re-fetch IPFS metadata when metadata_uri changed.
+  // Re-fetch IPFS metadata when metadata_uri changed; persist full blob + extracted fields.
   if (newUri) {
     const metadata = await fetchMetadata(newUri);
     if (metadata) {
@@ -59,6 +59,7 @@ export async function onListingUpdated(
         UPDATE service_listings
         SET capability = ${metadata.capability},
             endpoint   = ${metadata.endpoint},
+            metadata   = ${JSON.stringify(metadata)},
             updated_at = now()
         WHERE pubkey = ${pubkey}
       `;

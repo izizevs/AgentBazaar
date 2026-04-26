@@ -29,6 +29,13 @@
       "when": 1777132340370,
       "tag": "0003_happy_supernaut",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1777179723615,
+      "tag": "0004_short_vertigo",
+      "breakpoints": true
     }
   ]
 }
