@@ -194,3 +194,17 @@ export class InvalidListingError extends AgentBazaarError {
     super(`Invalid or inactive listing: ${listingId}`, options);
   }
 }
+
+/**
+ * Thrown when `clusterFromConnection()` cannot map an RPC endpoint URL to a
+ * known Solana cluster. Callers should verify the endpoint matches one of:
+ * `*.devnet.solana.com`, `*devnet*`, `localhost`, `127.0.0.1`,
+ * `*testnet*`, `*mainnet*`.
+ */
+export class UnknownClusterError extends AgentBazaarError {
+  readonly endpoint: string;
+  constructor(endpoint: string, options?: ErrorOptions) {
+    super(`Cannot determine Solana cluster from RPC endpoint: ${endpoint}`, options);
+    this.endpoint = endpoint;
+  }
+}

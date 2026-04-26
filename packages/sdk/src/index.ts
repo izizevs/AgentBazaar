@@ -22,9 +22,12 @@ export {
   RPCFallbackFailedError,
   TransactionFailedError,
   UnauthorizedError,
+  UnknownClusterError,
   ValidationError,
   WalletNotConnectedError,
 } from './errors.js';
+export type { Cluster, ProgramAddresses } from './program-ids.js';
+export { clusterFromConnection, PROGRAM_IDS } from './program-ids.js';
 export type {
   ConfirmInput,
   DeliverInput,

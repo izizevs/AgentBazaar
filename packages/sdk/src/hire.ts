@@ -11,8 +11,8 @@ import {
 } from './errors.js';
 import {
   DEVNET_USDC_MINT,
-  ESCROW_PROGRAM_ID,
   getAssociatedTokenAddress,
+  getEscrowProgramId,
   makeEscrowProgram,
   sendWithRetry,
 } from './escrow-utils.js';
@@ -51,14 +51,16 @@ export async function hireAgent(
   const nonce = input.nonce ?? BigInt(Date.now());
   const nonceBuf = new BN(nonce.toString()).toArrayLike(Buffer, 'le', 8);
 
+  const escrowProgramId = getEscrowProgramId(connection);
+
   const [escrowPda] = PublicKey.findProgramAddressSync(
     [Buffer.from('escrow'), wallet.publicKey.toBuffer(), listingPubkey.toBuffer(), nonceBuf],
-    ESCROW_PROGRAM_ID,
+    escrowProgramId,
   );
 
   const [vaultPda] = PublicKey.findProgramAddressSync(
     [Buffer.from('vault'), escrowPda.toBuffer()],
-    ESCROW_PROGRAM_ID,
+    escrowProgramId,
   );
 
   const program = makeEscrowProgram(connection, wallet);

@@ -10,9 +10,8 @@ import {
   TransactionFailedError,
   ValidationError,
 } from './errors.js';
+import { clusterFromConnection, PROGRAM_IDS } from './program-ids.js';
 import type { RegisterInput, RegisterResult } from './types.js';
-
-const PROGRAM_ID = new PublicKey('GJRgCCqkYvAezidpdd3i4p4kRRfJnM1EfGfgqYgchQqd');
 
 const U64_MAX = 18_446_744_073_709_551_615n;
 
@@ -115,10 +114,11 @@ export async function registerService(
   const capHash = await computeCapabilityHash(input.capability);
   const capHashArray = Array.from(capHash) as number[];
 
-  // 4. Derive listing PDA
+  // 4. Derive listing PDA — use cluster-aware registry program ID
+  const registryProgramId = PROGRAM_IDS[clusterFromConnection(connection)].registry;
   const [listingPda] = PublicKey.findProgramAddressSync(
     [Buffer.from('listing'), wallet.publicKey.toBuffer(), Buffer.from(capHash)],
-    PROGRAM_ID,
+    registryProgramId,
   );
 
   // 5. Build Anchor Program

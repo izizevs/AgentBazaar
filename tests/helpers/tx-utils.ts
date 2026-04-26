@@ -1,5 +1,6 @@
 import type { BazaarRegistry } from '@agentbazaar/idl';
 import { BazaarRegistryIDL, computeCapabilityHash } from '@agentbazaar/idl';
+import { clusterFromConnection, PROGRAM_IDS } from '@agentbazaar/sdk';
 import { AnchorProvider, Program } from '@coral-xyz/anchor';
 import {
   type Connection,
@@ -8,23 +9,24 @@ import {
   type VersionedTransaction,
 } from '@solana/web3.js';
 
-export const REGISTRY_PROGRAM_ID = new PublicKey('GJRgCCqkYvAezidpdd3i4p4kRRfJnM1EfGfgqYgchQqd');
-
 // Re-export so test files don't import directly from @agentbazaar/idl.
 export { computeCapabilityHash };
 
 /**
  * Derive the ServiceListing PDA for a given owner + capability string.
  * Mirrors the derivation in packages/sdk/src/register.ts.
+ * The registry program ID is resolved from the connection's RPC endpoint.
  */
 export async function deriveListingPda(
   ownerPublicKey: PublicKey,
   capability: string,
+  connection: Connection,
 ): Promise<PublicKey> {
+  const registryProgramId = PROGRAM_IDS[clusterFromConnection(connection)].registry;
   const capHash = await computeCapabilityHash(capability);
   const [pda] = PublicKey.findProgramAddressSync(
     [Buffer.from('listing'), ownerPublicKey.toBuffer(), Buffer.from(capHash)],
-    REGISTRY_PROGRAM_ID,
+    registryProgramId,
   );
   return pda;
 }

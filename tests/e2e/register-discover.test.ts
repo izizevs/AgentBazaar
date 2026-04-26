@@ -78,7 +78,7 @@ describe.skipIf(!isE2E)('E2E: register → discover', { timeout: 120_000 }, () =
       // Point at localhost so discover() hits the RPC fallback (no API in M0).
       discoveryApiUrl: 'http://localhost:9999',
     });
-    listingPda = await deriveListingPda(walletKeypair.publicKey, capability);
+    listingPda = await deriveListingPda(walletKeypair.publicKey, capability, connection);
   }, 120_000);
 
   it('listing PDA does not exist before register()', async () => {

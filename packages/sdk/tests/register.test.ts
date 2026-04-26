@@ -67,6 +67,7 @@ const MOCK_BLOCKHASH = '11111111111111111111111111111111';
 
 function makeConnection() {
   return {
+    rpcEndpoint: 'https://api.devnet.solana.com',
     getLatestBlockhash: vi.fn().mockResolvedValue({
       blockhash: MOCK_BLOCKHASH,
       lastValidBlockHeight: 100,

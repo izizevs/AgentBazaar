@@ -15,10 +15,15 @@ import {
   TransactionFailedError,
   UnauthorizedError,
 } from './errors.js';
+import { clusterFromConnection, PROGRAM_IDS } from './program-ids.js';
 
-export const ESCROW_PROGRAM_ID = new PublicKey('EhFptDs4mz6rt7HDmt8pB7ZogiqxUMVhpjB3NvToXxW2');
 export const TOKEN_PROGRAM_ID = new PublicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA');
 const ASSOCIATED_TOKEN_PROGRAM_ID = new PublicKey('ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJe1bC8');
+
+/** Returns the bazaar-escrow program ID for the cluster inferred from `connection`. */
+export function getEscrowProgramId(connection: Connection): PublicKey {
+  return PROGRAM_IDS[clusterFromConnection(connection)].escrow;
+}
 
 export const DEVNET_USDC_MINT = new PublicKey('4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU');
 

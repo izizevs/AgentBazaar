@@ -53,6 +53,7 @@ const LISTING_PDA = new PublicKey('GJRgCCqkYvAezidpdd3i4p4kRRfJnM1EfGfgqYgchQqd'
 
 function makeConnection(balance = '10000000') {
   return {
+    rpcEndpoint: 'https://api.devnet.solana.com',
     getLatestBlockhash: vi.fn().mockResolvedValue({
       blockhash: MOCK_BLOCKHASH,
       lastValidBlockHeight: 100,
