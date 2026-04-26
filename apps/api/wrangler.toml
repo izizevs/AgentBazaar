@@ -1,0 +1,18 @@
+name = "agentbazaar-api"
+main = "src/index.ts"
+compatibility_date = "2024-12-05"
+compatibility_flags = ["nodejs_compat"]
+
+[vars]
+APP_VERSION = "0.1.0"
+
+# Secrets (set via `wrangler secret put <KEY> --env production`) are NOT listed here.
+# Required secrets for production:
+#   DATABASE_URL   — Neon HTTP pooler connection string
+#
+# Served at: https://agentbazaar-api.4431f38bb27a8e8db699525ef5b0f9fe.workers.dev
+# (or agentbazaar-api.<subdomain>.workers.dev after account subdomain is set)
+
+[env.production]
+name = "agentbazaar-api"
+vars = { APP_VERSION = "0.1.0" }

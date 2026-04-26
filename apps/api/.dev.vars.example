@@ -1,0 +1,5 @@
+# Local development secrets for wrangler dev.
+# Copy to .dev.vars and fill in real values. Never commit .dev.vars.
+
+# Neon HTTP pooler connection string (use the -pooler variant for CF Workers):
+DATABASE_URL=postgresql://neondb_owner:<password>@ep-<branch>-pooler.<region>.aws.neon.tech/neondb?sslmode=require

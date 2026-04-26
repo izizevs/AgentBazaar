@@ -1,0 +1,29 @@
+{
+  "name": "@agentbazaar/api",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "build": "tsc --noEmit",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "deploy": "wrangler deploy --env production",
+    "lint": "biome check ."
+  },
+  "dependencies": {
+    "@neondatabase/serverless": "^0.10.4",
+    "drizzle-orm": "^0.41.0",
+    "hono": "^4.7.0",
+    "hono-rate-limiter": "^0.4.2",
+    "zod": "^3.23.8",
+    "@hono/zod-validator": "^0.4.2"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-pool-workers": "^0.8.0",
+    "@cloudflare/workers-types": "^4.20241205.0",
+    "typescript": "6.0.3",
+    "vitest": "^2.0.0",
+    "wrangler": "^4.0.0"
+  }
+}
