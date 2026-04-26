@@ -5740,3 +5740,168 @@ handle.
    expand–migrate–contract for any non-additive schema change to avoid
    the dual-window unavailability.
 
+
+---
+
+## PR #93 — feature/mcp-server-llm-tools — 2026-04-26
+**Verdict:** APPROVED (with non-blocking follow-ups)
+
+**Scope of review:** apps/mcp-server (M2-W3) — second publicly exposed
+AgentBazaar service after apps/api. CF Worker exposing MCP-over-HTTP
+(`POST /mcp`) gated by Bearer token, proxying to apps/api Discovery
+endpoints. 3 read-only tools registered: `bazaar_discover`,
+`bazaar_get_listing`, `bazaar_get_reputation`.
+
+Files reviewed (15, +1393):
+- `src/index.ts` — Hono entry + auth gate + MCP transport wiring
+- `src/auth.ts` — Bearer extract + constant-time validate
+- `src/server.ts` — McpServer + tool registrations
+- `src/tools/{discover,get-listing,get-reputation}.ts` — tool impls + Zod schemas
+- `src/api-client.ts` — fetch wrapper to Discovery API
+- `src/types.ts` — Bindings (MCP_AUTH_TOKEN, API_URL, APP_VERSION)
+- `wrangler.toml` — production env, no secrets committed
+- `tests/{auth,tools}.test.ts` — 23 unit tests
+- `package.json`, `tsconfig.json`, `vitest.config.ts`, `pnpm-lock.yaml`
+
+**Trust boundary recap:** Bearer-token compromise grants read-only
+access to publicly-on-chain data (listings + reputation snapshots).
+No write paths, no escrow interaction, no fund flow. Worst case is
+bandwidth abuse + free-tier exhaustion — *not* a privacy or
+non-custodial-claim breach.
+
+**Findings:**
+
+- **Critical:** none.
+
+- **High:** none.
+
+- **Medium:**
+  - **M1. No rate limiting on `POST /mcp`** (`src/index.ts`).
+    apps/api has `rateLimitMiddleware` (100 req/min IP, 1000 req/min
+    agent — `apps/api/src/middleware/ratelimit.ts`) but apps/mcp-server
+    does not. Because mcp-server proxies *server-side* to apps/api,
+    every Discovery API call from mcp-server is keyed by the CF Worker
+    egress IP, not the original client — i.e., apps/api's per-IP
+    rate-limit bucket is shared across ALL mcp-server callers and
+    effectively useless as upstream defence. An attacker with a leaked
+    Bearer token can exhaust CF Worker free-tier (100K req/day) and
+    burn through Helius/Postgres budget on the API side. Non-blocking
+    (token rotation is the immediate mitigation, see L1) but should
+    land before mainnet. Use the same `hono-rate-limiter` keyed on
+    `CF-Connecting-IP` (after auth, so it doesn't get spent on 401s).
+  - **M2. Length-mismatch short-circuit in `validateToken` leaks token
+    length** (`src/auth.ts:23`). The function does `if (token.length
+    !== expectedToken.length) return false` before the constant-time
+    XOR loop. An attacker can probe candidate lengths and observe the
+    timing delta between "wrong length" (instant) and "right length,
+    wrong content" (linear in length). The leak is the *length* of
+    `MCP_AUTH_TOKEN`, not the token itself — leaked length narrows
+    brute-force search space marginally. Severity: low-medium because
+    the token is high-entropy by convention, but the comment in the
+    code claims uniform timing ("we avoid early return to keep timing
+    uniform") which is misleading — the early `return false` IS the
+    early return. Fix: pad the shorter input to expectedToken.length
+    and always run the loop, then return `lengthsMatch && diff === 0`.
+
+- **Low:**
+  - **L1. Single shared Bearer token, no rotation infra.** Acknowledged
+    by the author (comment in `src/auth.ts:3`: "Future M3: per-client
+    tokens with rate limits"). Operational risk: a leaked token gives
+    persistent access until manually re-rotated via `wrangler secret
+    put`. Recommend (a) document rotation runbook in
+    `apps/mcp-server/README.md` and (b) plan per-client tokens for
+    M3. Token rotation is the front-line mitigation against M1
+    exhaustion attacks.
+  - **L2. Tool error messages may leak raw upstream API body**
+    (`src/server.ts:33-43,63-73,93-103`). The catch block returns
+    `Error: ${err.message}` to the MCP client. `ApiClient.get` throws
+    `ApiError(${status}, ${body})` whose `message` is `API error 502:
+    <full body>`. If apps/api ever returns an error body containing
+    a stack trace, internal hostname, or env hint, it's reflected
+    verbatim to the LLM (and any human watching the LLM trace). Fix:
+    in the error wrapper, distinguish 4xx (propagate sanitised
+    message — caller's input was bad) from 5xx (return generic
+    "Discovery API unavailable" + log the body server-side via
+    `console.error`).
+  - **L3. No CORS middleware = browsers blocked by default — but
+    intent is undocumented.** Hono with no `cors()` call means any
+    cross-origin browser request without an `Access-Control-Allow-Origin`
+    header from the server gets blocked by the browser (good — Bearer
+    tokens shouldn't be exfiltrable from XSS). But there's no
+    explicit comment confirming this is intentional vs. forgotten. A
+    future contributor may "fix the missing CORS" by copy-pasting
+    apps/api's `origin: '*'` middleware (`apps/api/src/middleware/cors.ts:5`).
+    Mitigation: add a 1-line comment to `src/index.ts` near the route
+    declaration: `// MCP servers are HTTP transports for LLM clients,
+    not browser-callable — CORS intentionally omitted to prevent
+    Bearer-token exfiltration via XSS`.
+  - **L4. Misconfigured-token error returns 500, not 503/401**
+    (`src/index.ts:43`). When `MCP_AUTH_TOKEN` is not set in env, the
+    response is `500 server_misconfigured`. This both signals "ops
+    issue" (correct) and inadvertently confirms the auth path exists
+    to an unauthenticated probe. Consider returning `401` with a
+    generic message (so unset secret looks indistinguishable from
+    missing-Bearer) and only logging the misconfig server-side. Minor
+    info-leak.
+  - **L5. `expectedToken: c.env.MCP_AUTH_TOKEN ?? ''` defensively
+    coerces to empty string.** Combined with L4, an empty
+    `MCP_AUTH_TOKEN` would be caught by the `!expectedToken` guard
+    (treated as unset) — good. But if someone deploys with
+    `MCP_AUTH_TOKEN=" "` (a single space), the guard passes and
+    every request authenticates with the literal `" "`. Add a length
+    floor (e.g., `expectedToken.length >= 32`) or trim+check.
+
+**Checklist confirmations (all PASS):**
+- ✅ Constant-time loop is XOR-based (`auth.ts:24-28`); only the
+  length-mismatch fast-path leaks (M2 above).
+- ✅ Token NOT committed (no occurrences in `apps/mcp-server/`,
+  `wrangler.toml` only declares secret name; `.env`-side secret).
+- ✅ Auth gate runs BEFORE `transport.handleRequest` and before
+  `parsedBody` JSON parse on every `/mcp` method (POST/GET/DELETE).
+  `app.all('/mcp', …)` covers tools/list, tools/call, initialize,
+  shutdown, notifications — all gated.
+- ✅ Missing/empty Authorization → 401 (`index.ts:47-52`).
+- ✅ Wrong token → 401 (not 403) (`index.ts:53-55`).
+- ✅ Pubkey base58 regex `^[1-9A-HJ-NP-Za-km-z]{32,44}$` enforced via
+  Zod on tool input BEFORE api-client call
+  (`tools/get-listing.ts:5,10`, `tools/get-reputation.ts:5,10`).
+- ✅ `capability` length-capped at 256 chars (`tools/discover.ts:9`).
+- ✅ `limit` clamped to 1–100, default 20 (`tools/discover.ts:13-18`),
+  matches apps/api contract.
+- ✅ `encodeURIComponent` applied to user-controlled path params
+  (`api-client.ts:87,91`).
+- ✅ Tool outputs `JSON.stringify`'d → SSE framing safe (raw `\n\n`
+  is escaped to `\\n\\n` by `JSON.stringify`).
+- ✅ All 3 tools annotated `readOnlyHint: true, idempotentHint: true`.
+- ✅ api-client only does READ operations against apps/api — no PUT,
+  POST, DELETE, PATCH (`api-client.ts:62`: `fetch(url, { headers: …
+  })` with default GET method, no body).
+- ✅ Stateless transport per request (`index.ts:63-66`,
+  `sessionIdGenerator: undefined`) — no session-fixation surface.
+- ✅ Vitest coverage: 23 tests across auth + tools.
+
+**Verdict justification:**
+PR #93 ships a defensible MVP MCP server. No critical or high
+findings. The five non-blocking findings are M3 hardening, not
+gating issues. Bearer auth is implemented correctly (modulo the
+length-leak nit), input validation is present at the right layer
+(Zod on the tool schema, BEFORE the api-client call), URL
+construction is encoded, and the trust boundary is read-only data
+that is already publicly on-chain.
+
+Trust-boundary specific: a leaked token does NOT enable USDC
+movement, escrow withdrawal, or any write. Non-custodial claim
+preserved.
+
+**Recommended follow-ups (track as M2-W6 / M3 polish):**
+
+1. **(M2-W6)** Add a `hono-rate-limiter` middleware on `/mcp` after
+   the auth gate, keyed by `CF-Connecting-IP` (M1). 100 req/min
+   defensive baseline matching apps/api.
+2. **(M2-W6)** Fix the constant-time length leak (M2): pad+compare
+   instead of early-return on length mismatch. Update the misleading
+   comment.
+3. **(M3)** Per-client Bearer tokens (L1) + sanitise upstream error
+   propagation (L2) + CORS-omission comment (L3) + 401-on-misconfig
+   (L4) + token-length floor (L5).
+
