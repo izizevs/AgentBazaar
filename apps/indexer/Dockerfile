@@ -14,15 +14,21 @@ RUN apk add --no-cache curl
 
 WORKDIR /build
 
-# Copy workspace manifests first for layer-cache efficiency
+# Copy workspace manifests first for layer-cache efficiency.
+# pnpm --frozen-lockfile validates against ALL workspace members, so every
+# package.json referenced by pnpm-workspace.yaml must exist before install.
 COPY package.json pnpm-workspace.yaml pnpm-lock.yaml turbo.json ./
 COPY packages/idl/package.json ./packages/idl/
+COPY packages/sdk/package.json ./packages/sdk/
 COPY apps/indexer/package.json ./apps/indexer/
+COPY apps/api/package.json ./apps/api/
+COPY apps/mcp-server/package.json ./apps/mcp-server/
+COPY tests/package.json ./tests/
 # tsconfig.base.json lives at monorepo root
 COPY tsconfig.base.json ./
 
-# Install all deps needed by the build graph
-RUN pnpm install --frozen-lockfile --filter @agentbazaar/indexer...
+# Install all workspace deps (filter notation drops some transitive deps)
+RUN pnpm install --frozen-lockfile
 
 # Copy source
 COPY packages/idl/ ./packages/idl/
@@ -47,11 +53,16 @@ RUN apk add --no-cache curl
 
 WORKDIR /app
 
-# Copy workspace manifests needed for production install
+# Copy workspace manifests needed for production install — same set as builder
+# stage because pnpm validates the entire workspace against the lockfile.
 COPY package.json pnpm-workspace.yaml pnpm-lock.yaml turbo.json ./
 COPY tsconfig.base.json ./
 COPY packages/idl/package.json ./packages/idl/
+COPY packages/sdk/package.json ./packages/sdk/
 COPY apps/indexer/package.json ./apps/indexer/
+COPY apps/api/package.json ./apps/api/
+COPY apps/mcp-server/package.json ./apps/mcp-server/
+COPY tests/package.json ./tests/
 
 # Production deps only (no devDependencies)
 RUN pnpm install --frozen-lockfile --filter @agentbazaar/indexer... --prod
