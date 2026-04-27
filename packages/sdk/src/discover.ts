@@ -14,6 +14,8 @@ import type { DiscoverInput, ServiceProvider, SlaParams } from './types.js';
 
 const DEFAULT_LIMIT = 50;
 const MAX_LIMIT = 200;
+// apps/api Zod schema enforces limit <= 100; clamp before building the request URL.
+const API_MAX_LIMIT = 100;
 
 const DiscoverInputSchema = z.object({
   capability: z.string().max(256).optional(),
@@ -131,7 +133,9 @@ async function fetchFromAPI(
       url.searchParams.set('sort', 'completedJobs');
       url.searchParams.set('order', 'asc');
     }
-    url.searchParams.set('limit', String(limit));
+    // Clamp to API_MAX_LIMIT (100) — apps/api Zod schema rejects limit > 100 with 422.
+    const apiLimit = Math.min(limit, API_MAX_LIMIT);
+    url.searchParams.set('limit', String(apiLimit));
     res = await fetch(url.toString(), { signal: AbortSignal.timeout(10_000) });
   } catch (err) {
     throw new DiscoveryAPIError(

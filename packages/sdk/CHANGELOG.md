@@ -5,6 +5,26 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [0.2.3] — 2026-04-26 (Task #59, M2-W6)
+
+### Fixed
+
+- **R6 — discover() limit clamp** (Task #59).
+  The SDK was sending `limit=200` to the API, which enforces `limit <= 100` via Zod and
+  returns 422. The request URL now clamps the limit to `API_MAX_LIMIT` (100) before building
+  the query string. SDK callers can still pass `limit` up to 200; the clamping is transparent
+  and only applies to the HTTP request, not the RPC fallback path.
+
+- **R7 — mapSimulationError transactionMessage fallback** (Task #59).
+  When `SendTransactionError.logs` is `undefined` (web3.js path), the existing log-parsing
+  loop produced no match and the caller received a generic `TransactionFailedError` instead of
+  the typed exception (e.g. `EscrowNotExpiredError` for code 6006 `DeadlineNotYetPassed`).
+  `mapSimulationError` now falls back to parsing the `fallbackMessage` string (the error
+  message / `transactionMessage`) for a `custom program error: 0x<hex>` pattern when the
+  logs array yields no match. The negative `claimTimeout` E2E test is unblocked.
+
+---
+
 ## [0.2.2] — 2026-04-26 (Task #56, M2-W4)
 
 ### Changed

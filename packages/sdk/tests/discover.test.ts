@@ -323,6 +323,31 @@ describe('discoverServices — Discovery API primary path', () => {
     expect(calledUrl.searchParams.get('limit')).toBe('10');
   });
 
+  // R6: SDK used to send limit=200 → API enforces limit<=100 → 422.
+  // SDK now clamps to API_MAX_LIMIT (100) before building the request URL.
+  it('R6: clamps limit=200 to 100 in the API request URL (never sends limit > 100)', async () => {
+    const mockFetch = mockOkResponse([]);
+    vi.stubGlobal('fetch', mockFetch);
+
+    await discoverServices(connection, wallet, { limit: 200 }, apiUrl);
+
+    const firstCall = mockFetch.mock.calls[0]!;
+    const calledUrl = new URL(firstCall[0] as string);
+    expect(calledUrl.searchParams.get('limit')).toBe('100');
+    expect(calledUrl.searchParams.get('limit')).not.toBe('200');
+  });
+
+  it('R6: does not clamp limit=50 (well within API_MAX_LIMIT)', async () => {
+    const mockFetch = mockOkResponse([]);
+    vi.stubGlobal('fetch', mockFetch);
+
+    await discoverServices(connection, wallet, { limit: 50 }, apiUrl);
+
+    const firstCall = mockFetch.mock.calls[0]!;
+    const calledUrl = new URL(firstCall[0] as string);
+    expect(calledUrl.searchParams.get('limit')).toBe('50');
+  });
+
   it('maps sort=price_asc to sort=price&order=asc', async () => {
     const mockFetch = mockOkResponse([]);
     vi.stubGlobal('fetch', mockFetch);

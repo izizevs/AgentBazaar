@@ -163,4 +163,27 @@ describe('mapSimulationError', () => {
     expect(err).toBeInstanceOf(TransactionFailedError);
     expect(err.message).toContain('node rejected preflight');
   });
+
+  // R7: when err.logs is undefined (web3.js path), mapSimulationError receives logs=[]
+  // and must fall back to parsing the transactionMessage / err.message string.
+  it('R7: maps transactionMessage with 0x1776 (6006) to EscrowNotExpiredError when logs=[]', () => {
+    const msg =
+      'Transaction simulation failed: Error processing Instruction 0: custom program error: 0x1776';
+    const err = mapSimulationError([], msg);
+    expect(err).toBeInstanceOf(EscrowNotExpiredError);
+  });
+
+  it('R7: maps transactionMessage with 0x1770 (6000) to UnauthorizedError when logs=[]', () => {
+    const msg =
+      'Transaction simulation failed: Error processing Instruction 0: custom program error: 0x1770';
+    const err = mapSimulationError([], msg);
+    expect(err).toBeInstanceOf(UnauthorizedError);
+  });
+
+  it('R7: falls back to TransactionFailedError when logs=[] and transactionMessage has no hex code', () => {
+    const msg = 'Transaction simulation failed: some other node error';
+    const err = mapSimulationError([], msg);
+    expect(err).toBeInstanceOf(TransactionFailedError);
+    expect(err.message).toContain('some other node error');
+  });
 });

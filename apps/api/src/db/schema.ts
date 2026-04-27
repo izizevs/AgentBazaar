@@ -47,7 +47,7 @@ export const serviceListings = pgTable(
     owner: text('owner').notNull(),
     capabilityHash: bytea('capability_hash').notNull(),
     satiAgentId: bigint('sati_agent_id', { mode: 'bigint' }).notNull(),
-    priceUsdcBaseUnits: bigint('price_lamports', { mode: 'bigint' }).notNull(),
+    priceUsdcBaseUnits: bigint('price_usdc_base_units', { mode: 'bigint' }).notNull(),
     pricingModel: integer('pricing_model').notNull(),
     slaParams: jsonb('sla_params').$type<SlaParams>().notNull(),
     metadataUri: text('metadata_uri').notNull(),

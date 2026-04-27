@@ -180,7 +180,10 @@ function mapConfirmError(err: unknown, signature: string): Error {
  *
  * Log formats handled:
  * 1. Anchor: `Program log: AnchorError occurred. Error Code: <Name>. Error Number: <N>.`
- * 2. Raw:    `Program <ID> failed: custom program error: 0x<hex>`
+ * 2. Raw (logs array): `Program <ID> failed: custom program error: 0x<hex>`
+ * 3. Fallback (transactionMessage string, web3.js path where `err.logs` is undefined):
+ *    `"Transaction simulation failed: Error processing Instruction 0: custom program error: 0x178a"`
+ *    The hex code is extracted via regex and looked up in the error-code table.
  */
 export function mapSimulationError(logs: string[], fallbackMessage: string): Error {
   for (const line of logs) {
@@ -197,6 +200,15 @@ export function mapSimulationError(logs: string[], fallbackMessage: string): Err
       return mapProgramCode(code, `Simulation failed — program error ${code}: ${line}`);
     }
   }
+
+  // Fallback: when err.logs is undefined (web3.js path), parse the transactionMessage string.
+  // e.g. "Transaction simulation failed: Error processing Instruction 0: custom program error: 0x178a"
+  const msgMatch = fallbackMessage.match(/custom program error:\s*0x([0-9a-f]+)/i);
+  if (msgMatch?.[1] !== undefined) {
+    const code = Number.parseInt(msgMatch[1], 16);
+    return mapProgramCode(code, `Simulation failed — program error ${code}: ${fallbackMessage}`);
+  }
+
   return new TransactionFailedError(`Simulation failed: ${fallbackMessage}`);
 }
 
