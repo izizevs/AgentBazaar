@@ -16,7 +16,7 @@ import { readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import type { ServiceProvider } from '@agentbazaar/sdk';
-import { AgentBazaar } from '@agentbazaar/sdk';
+import { AgentBazaar, DegradedDiscoveryError } from '@agentbazaar/sdk';
 import { Wallet } from '@coral-xyz/anchor';
 import { Connection, Keypair, type PublicKey } from '@solana/web3.js';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -110,8 +110,19 @@ describe.skipIf(!isE2E)('E2E: register → discover', { timeout: 120_000 }, () =
   });
 
   it('discover() returns the registered listing via RPC fallback', async () => {
-    // The RPC fallback loads all program accounts; filter by PDA to find ours.
-    const results = await bazaar.discover({ limit: 200 });
+    // discoveryApiUrl is intentionally pointed at localhost:9999 (unavailable) so the
+    // SDK degrades to the RPC fallback path and throws DegradedDiscoveryError with
+    // rpcResults attached. Accept the degraded mode in tests.
+    let results: ServiceProvider[] = [];
+    try {
+      results = await bazaar.discover({ limit: 200 });
+    } catch (err) {
+      if (err instanceof DegradedDiscoveryError) {
+        results = err.rpcResults as ServiceProvider[];
+      } else {
+        throw err;
+      }
+    }
 
     const found = results.find(
       (r: ServiceProvider) => r.listing.toBase58() === listingPda.toBase58(),

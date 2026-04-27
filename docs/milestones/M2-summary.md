@@ -164,5 +164,40 @@ Database: Neon `ep-wild-rice-anbjwl1b-pooler.c-6.us-east-1.aws.neon.tech`.
 - **Audit sessions:** 6 (PRs #84, #87, #91, #92, #94, #96)
 - **Critical/High findings in M2:** 0
 - **Medium findings:** 3 (all non-blocking, M3 deferred)
-- **E2E test results:** 10/13 pass; 3 pre-existing integration-boundary failures filed as M3 tasks
+- **E2E test results:** 10/13 pass (Phase 1); 13/13 pass (Task #58 closeout — see below)
 - **Services live on devnet:** 4 (indexer Fly, API CF, MCP CF, SDK 0.2.2 npm-dry-run)
+
+---
+
+## Task #58 Closeout — M2 GREEN (2026-04-26)
+
+**Final E2E run:** all 13 tests pass. Two test-side issues + one SDK bug fixed in PR #100.
+
+### Fixes applied
+
+**RD1 — discover() contract mismatch (test-side):**
+`tests/e2e/register-discover.test.ts` and `tests/e2e/full-lifecycle.test.ts` were written before PR #95 changed `discover()` to always throw `DegradedDiscoveryError` on API unavailability. Both tests used `discoveryApiUrl: 'http://localhost:9999'` (intentionally unavailable) but expected a direct array return. Fixed: added try/catch around `discover()` calls accepting `DegradedDiscoveryError` and unpacking `err.rpcResults`.
+
+**Issue 3 — dist build gate (test infrastructure):**
+Added `"pretest:e2e": "pnpm --filter @agentbazaar/sdk build"` to `tests/package.json` so E2E runs always execute against a freshly built SDK dist, eliminating stale-bundle false failures.
+
+**RD2 / R7 — EscrowNotExpiredError not thrown (SDK bug):**
+Root cause: pnpm resolves two distinct `@solana/web3.js` module instances (SDK's own `node_modules` vs the test process's `node_modules`). The `instanceof SendTransactionError` guard in `sendWithRetry` evaluated to `false` for errors thrown by the test process's `Connection`, so `mapSimulationError` was never called. The error fell through to the retry loop, was treated as transient (not an SDK error type), and after all retries was wrapped in a plain `TransactionFailedError`. Fixed in `packages/sdk/src/escrow-utils.ts`: added duck-type fallback (`typeof sendErr.transactionMessage === 'string'`) to detect `SendTransactionError` across module boundaries.
+
+### Final E2E results (2026-04-26)
+
+| Suite | Tests | Pass | Fail |
+|---|---|---|---|
+| `register-discover.test.ts` | 4 | 4 | 0 |
+| `full-lifecycle.test.ts` | 5 | 5 | 0 |
+| `timeout-lifecycle.test.ts` | 2 | 2 | 0 |
+| `dispute-lifecycle.test.ts` | 2 | 2 | 0 |
+| **Total** | **13** | **13** | **0** |
+
+### R5 / R6 / R7 E2E verified
+
+- **R5 (dispute):** `dispute-lifecycle.test.ts` green — dispute + immediate buyer refund + negative deliver-after-dispute guard.
+- **R6 (confirm):** `full-lifecycle.test.ts` green — hire → deliver → confirm → USDC released to seller + `jobs_completed` incremented.
+- **R7 (timeout):** `timeout-lifecycle.test.ts` green — `EscrowNotExpiredError` on premature claim + successful claim after 30-second deadline elapses.
+
+**M2 status: CLOSED GREEN.**

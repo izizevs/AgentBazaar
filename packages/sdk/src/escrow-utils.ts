@@ -102,9 +102,22 @@ export async function sendWithRetry(
         // sendRawTransaction throws SendTransactionError when the node rejects the tx
         // pre-flight (simulation). Map simulation program errors to typed exceptions so
         // callers get the same typed-error experience as post-confirm errors.
-        if (sendErr instanceof SendTransactionError) {
-          const logs = sendErr.logs ?? [];
-          const mapped = mapSimulationError(logs, sendErr.message);
+        //
+        // Duck-type instead of `instanceof SendTransactionError` because pnpm may resolve
+        // two different @solana/web3.js instances (one in the SDK bundle, one in the test
+        // or app process), making instanceof checks cross-realm failures.
+        // The SendTransactionError in web3.js 1.98+ exposes `transactionMessage` property.
+        const isSendTxError =
+          sendErr instanceof SendTransactionError ||
+          (sendErr instanceof Error &&
+            typeof (sendErr as unknown as Record<string, unknown>).transactionMessage === 'string');
+        if (isSendTxError && sendErr instanceof Error) {
+          const txErr = sendErr as unknown as {
+            logs?: string[] | undefined;
+            message: string;
+          };
+          const logs = txErr.logs ?? [];
+          const mapped = mapSimulationError(logs, txErr.message);
           throw mapped;
         }
         throw sendErr;

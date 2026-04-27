@@ -17,7 +17,7 @@ import { readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import type { ServiceProvider } from '@agentbazaar/sdk';
-import { AgentBazaar } from '@agentbazaar/sdk';
+import { AgentBazaar, DegradedDiscoveryError } from '@agentbazaar/sdk';
 import { Wallet } from '@coral-xyz/anchor';
 import { getAssociatedTokenAddressSync } from '@solana/spl-token';
 import { Connection, Keypair, type PublicKey } from '@solana/web3.js';
@@ -109,7 +109,19 @@ describe.skipIf(!isE2E)('E2E: full escrow lifecycle (happy path)', { timeout: 18
   }, 180_000);
 
   it('discover() returns the registered listing', async () => {
-    const results = await buyerBazaar.discover({ limit: 200 });
+    // discoveryApiUrl is pointed at localhost:9999 (unavailable); SDK degrades to
+    // RPC fallback and throws DegradedDiscoveryError with rpcResults attached.
+    let results: ServiceProvider[] = [];
+    try {
+      results = await buyerBazaar.discover({ limit: 200 });
+    } catch (err) {
+      if (err instanceof DegradedDiscoveryError) {
+        results = err.rpcResults as ServiceProvider[];
+      } else {
+        throw err;
+      }
+    }
+
     const found = results.find(
       (r: ServiceProvider) => r.listing.toBase58() === listingPda.toBase58(),
     );
