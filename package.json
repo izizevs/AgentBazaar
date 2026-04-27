@@ -17,10 +17,20 @@
     "dev": "turbo run dev",
     "clean": "turbo run clean && rm -rf node_modules",
     "build:programs": "cd programs && anchor build",
-    "test:programs": "cd programs && anchor test"
+    "test:programs": "cd programs && anchor test",
+    "demo": "pnpm --filter @agentbazaar/sdk build && tsx scripts/demo.ts"
+  },
+  "dependencies": {
+    "@agentbazaar/idl": "workspace:*",
+    "@agentbazaar/sdk": "workspace:*",
+    "@coral-xyz/anchor": "0.31.1",
+    "@solana/spl-token": "^0.4.9",
+    "@solana/web3.js": "^1.95.0",
+    "dotenv": "^16.0.0"
   },
   "devDependencies": {
     "@biomejs/biome": "2.4.13",
+    "tsx": "^4.19.2",
     "turbo": "2.9.6",
     "typescript": "6.0.3"
   }
