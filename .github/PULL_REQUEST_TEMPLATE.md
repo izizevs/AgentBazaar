@@ -24,7 +24,7 @@
 ## Self-checklist
 
 - [ ] No Cyrillic / non-English content in committed files
-- [ ] No commit attribution to user (`repo-owner`); no `Co-Authored-By: Claude` trailer
+- [ ] No commit attribution to the human PM; no `Co-Authored-By: Claude` trailer
 - [ ] No secrets in code, logs, or test fixtures
 - [ ] `pnpm lint` clean
 - [ ] `pnpm typecheck` clean

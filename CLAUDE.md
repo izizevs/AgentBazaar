@@ -135,7 +135,7 @@ pnpm lint
 - `/workspace/docs/decisions/NNNN-*.md` — ADR every time a non-trivial decision is made.
 - `/workspace/docs/milestones/M<N>-summary.md` — at milestone completion.
 - GH PR/Issues — natural visibility stream.
-- **Interruptions only via GH Issue `blocker` + `the PM`** — when truly stuck or an external system breaks.
+- **Interruptions only via GH Issue `blocker`** — when truly stuck or an external system breaks.
 
 ## Language
 
@@ -144,7 +144,7 @@ pnpm lint
 ## Commit convention
 
 - **Author:** `AgentBazaar <dev@agentbazaar.local>` — set globally in git config.
-- **Never** attribute the user (`repo-owner`).
+- **Never** attribute the human PM.
 - **Never** add `Co-Authored-By: Claude ...` trailer to commit messages.
 - Branch naming: `feature/<component>-<short-name>`, e.g., `feature/anchor-registry-init`, `feature/sdk-discover-api`.
 - Conventional commits: `feat:`, `fix:`, `chore:`, `docs:`, `refactor:`, `test:`.

@@ -47,3 +47,4 @@ packages/sdk/src/generated
 # Claude agent runtime (already persisted elsewhere via bind mount)
 claude-auth
 claude-auth.json
+.vercel
