@@ -6,7 +6,7 @@ compatibility_flags = ["nodejs_compat"]
 [vars]
 APP_VERSION = "0.2.0"
 API_URL = "https://agentbazaar-api.r-443.workers.dev"
-RPC_URL = "https://api.devnet.solana.com"
+RPC_URL = "https://devnet.helius-rpc.com/?api-key=e182b4e3-830d-4584-8d17-10030d7a6d5f"
 
 # Secrets (set via `wrangler secret put <KEY> --env production`):
 #   MCP_AUTH_TOKEN — shared Bearer token for LLM agent clients
@@ -17,4 +17,4 @@ RPC_URL = "https://api.devnet.solana.com"
 
 [env.production]
 name = "agentbazaar-mcp"
-vars = { APP_VERSION = "0.2.0", API_URL = "https://agentbazaar-api.r-443.workers.dev", RPC_URL = "https://api.devnet.solana.com" }
+vars = { APP_VERSION = "0.2.0", API_URL = "https://agentbazaar-api.r-443.workers.dev", RPC_URL = "https://devnet.helius-rpc.com/?api-key=e182b4e3-830d-4584-8d17-10030d7a6d5f" }
