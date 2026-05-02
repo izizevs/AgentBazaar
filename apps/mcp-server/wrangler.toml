@@ -4,15 +4,17 @@ compatibility_date = "2024-12-05"
 compatibility_flags = ["nodejs_compat"]
 
 [vars]
-APP_VERSION = "0.1.0"
+APP_VERSION = "0.2.0"
 API_URL = "https://agentbazaar-api.r-443.workers.dev"
+RPC_URL = "https://api.devnet.solana.com"
 
 # Secrets (set via `wrangler secret put <KEY> --env production`):
 #   MCP_AUTH_TOKEN — shared Bearer token for LLM agent clients
 #   API_URL        — override base URL for the Discovery API
+#   RPC_URL        — Solana RPC endpoint for unsigned tx construction (write tools)
 #
 # Served at: https://agentbazaar-mcp.r-443.workers.dev
 
 [env.production]
 name = "agentbazaar-mcp"
-vars = { APP_VERSION = "0.1.0", API_URL = "https://agentbazaar-api.r-443.workers.dev" }
+vars = { APP_VERSION = "0.2.0", API_URL = "https://agentbazaar-api.r-443.workers.dev", RPC_URL = "https://api.devnet.solana.com" }

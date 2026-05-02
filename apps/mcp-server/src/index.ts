@@ -56,8 +56,9 @@ app.all('/mcp', async (c) => {
 
   // 2. Build per-request client + server (stateless: no session state in CF Workers)
   const apiUrl = c.env.API_URL ?? 'https://agentbazaar-api.r-443.workers.dev';
+  const rpcUrl = c.env.RPC_URL ?? 'https://api.devnet.solana.com';
   const client = new ApiClient(apiUrl);
-  const mcpServer: McpServer = createMcpServer(client);
+  const mcpServer: McpServer = createMcpServer(client, rpcUrl);
 
   // 3. Stateless transport — one per request, no session ID
   const transport = new WebStandardStreamableHTTPServerTransport({

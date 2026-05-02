@@ -47,3 +47,17 @@ export type {
   ServiceProvider,
   SlaParams,
 } from './types.js';
+export {
+  buildRegisterTx,
+  buildHireTx,
+  buildDeliverTx,
+  buildConfirmTx,
+} from './build-txs.js';
+export type {
+  BuildRegisterTxInput,
+  BuildRegisterTxResult,
+  BuildHireTxInput,
+  BuildHireTxResult,
+  BuildDeliverTxInput,
+  BuildConfirmTxInput,
+} from './build-txs.js';
