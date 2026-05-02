@@ -12,7 +12,9 @@
     "lint": "biome check ."
   },
   "dependencies": {
+    "@agentbazaar/sdk": "workspace:*",
     "@modelcontextprotocol/sdk": "^1.29.0",
+    "@solana/web3.js": "^1.95.0",
     "hono": "^4.7.0",
     "zod": "^3.23.8"
   },

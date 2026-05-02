@@ -5,6 +5,38 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [0.3.0] — 2026-04-26 (Task #64, MCP write tools)
+
+### Added
+
+- **`buildRegisterTx(connection, input)`** — builds an unsigned `register_service` transaction.
+  Unlike `registerService()` it does not upload metadata to Pinata; the caller must pass an
+  already-pinned `metadataUri`. Returns `{ transaction, listingPubkey }`.
+
+- **`buildHireTx(connection, input)`** — builds an unsigned `create_escrow` transaction.
+  Returns `{ transaction, escrowPubkey, vaultPubkey }`.  Caller supplies `nonce`; PDAs are
+  deterministic so the same nonce can be used for idempotent retries.
+
+- **`buildDeliverTx(connection, input)`** — builds an unsigned `submit_delivery` transaction.
+  `resultHashHex` must be exactly 64 hex characters (32 bytes).
+
+- **`buildConfirmTx(connection, input)`** — builds an unsigned `confirm_delivery` transaction.
+  `slaSeverity` (0–3) maps to reputation scores 100/75/50/25.  If `listingPubkey` and
+  `sellerPubkey` are omitted the function fetches them from chain via the escrow account.
+
+All four builders are exported as named exports from `@agentbazaar/sdk` along with their input
+and result types.  Existing `registerService`, `hireAgent`, `deliverJob`, `confirmDelivery` send
+functions are unchanged.
+
+### Architecture note
+
+The builders follow the **sign-tx-on-client** pattern: the SDK constructs the unsigned
+`Transaction`, returns it for the caller to serialise (`tx.serialize({ requireAllSignatures: false })`),
+and leaves signing + broadcast to the client's own wallet.  The MCP server uses these builders
+to expose write tools without ever holding private keys.
+
+---
+
 ## [0.2.3] — 2026-04-26 (Task #59, M2-W6)
 
 ### Fixed
