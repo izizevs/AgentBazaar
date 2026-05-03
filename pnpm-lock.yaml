@@ -179,6 +179,9 @@ importers:
       '@hono/node-server':
         specifier: ^1.13.7
         version: 1.19.14(hono@4.12.15)
+      bs58:
+        specifier: ^6.0.0
+        version: 6.0.0
       dotenv-mono:
         specifier: ^1.4.0
         version: 1.5.1
