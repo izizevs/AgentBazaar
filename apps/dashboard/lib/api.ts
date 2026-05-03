@@ -55,7 +55,7 @@ interface ApiListing {
   capability: string | null;
   priceUsdcBaseUnits: string | number;
   pricingModel: number;
-  slaParams: SlaParams | null;
+  slaParams: Partial<SlaParams> | null;
   jobsCompleted: number;
   reputationScore: number;
   isActive: boolean;
@@ -74,13 +74,7 @@ function toListing(api: ApiListing): Listing {
     capability: api.capability ?? 'unknown',
     priceUsdc: Number(api.priceUsdcBaseUnits),
     pricingModel: PRICING_MODELS[api.pricingModel] ?? 'per_request',
-    sla: api.slaParams ?? {
-      maxLatencyMs: undefined,
-      minUptimePct: undefined,
-      responseFormat: undefined,
-      jsonSchemaUri: undefined,
-      customParams: [],
-    },
+    sla: api.slaParams ?? {},
     reputation: api.reputationScore ?? 0,
     jobsCompleted: api.jobsCompleted ?? 0,
     isActive: api.isActive,
