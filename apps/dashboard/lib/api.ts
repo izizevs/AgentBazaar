@@ -80,22 +80,34 @@ export async function fetchListings(query: ListingsQuery = {}): Promise<Paginate
   if (query.minReputation !== undefined) params.set('minReputation', String(query.minReputation));
   if (query.maxPrice !== undefined) params.set('maxPrice', String(query.maxPrice));
   if (query.maxLatency !== undefined) params.set('maxLatency', String(query.maxLatency));
-  if (query.sort) params.set('sort', query.sort);
+  if (query.sort) {
+    // API contract: sort=reputation|price|completedJobs + order=asc|desc separately
+    const map: Record<string, { sort: string; order: 'asc' | 'desc' }> = {
+      reputation_desc: { sort: 'reputation', order: 'desc' },
+      price_asc: { sort: 'price', order: 'asc' },
+      latency_asc: { sort: 'completedJobs', order: 'asc' }, // best-effort: no latency col
+    };
+    const m = map[query.sort];
+    if (m) {
+      params.set('sort', m.sort);
+      params.set('order', m.order);
+    }
+  }
   if (query.limit !== undefined) params.set('limit', String(query.limit));
   if (query.offset !== undefined) params.set('offset', String(query.offset));
   const qs = params.toString();
   try {
-    const result = await apiFetch<{ items?: Listing[]; total?: number } | Listing[]>(
-      `/listings${qs ? `?${qs}` : ''}`,
-    );
-    // Handle both array and paginated responses
+    const result = await apiFetch<
+      | { data?: Listing[]; pagination?: { total?: number }; items?: Listing[]; total?: number }
+      | Listing[]
+    >(`/listings${qs ? `?${qs}` : ''}`);
+    // Handle paginated `{data, pagination}` (current API), legacy `{items, total}`, or raw array
     if (Array.isArray(result)) {
       return { items: result, total: result.length };
     }
-    return {
-      items: result.items ?? [],
-      total: result.total ?? result.items?.length ?? 0,
-    };
+    const items = result.data ?? result.items ?? [];
+    const total = result.pagination?.total ?? result.total ?? items.length;
+    return { items, total };
   } catch {
     return { items: [], total: 0 };
   }
