@@ -47,6 +47,49 @@ export interface PaginatedListings {
   total: number;
 }
 
+// ─── API → Dashboard shape ─────────────────────────────────────────────────────
+
+interface ApiListing {
+  pubkey: string;
+  owner: string;
+  capability: string | null;
+  priceUsdcBaseUnits: string | number;
+  pricingModel: number;
+  slaParams: SlaParams | null;
+  jobsCompleted: number;
+  reputationScore: number;
+  isActive: boolean;
+  endpoint: string | null;
+  metadata: { name?: string; description?: string; avatar?: string } | null;
+}
+
+const PRICING_MODELS = ['per_request', 'per_job', 'hourly', 'subscription'] as const;
+
+function toListing(api: ApiListing): Listing {
+  const meta = api.metadata ?? {};
+  return {
+    pubkey: api.pubkey,
+    name: meta.name ?? truncatePubkey(api.pubkey, 6),
+    description: meta.description ?? '',
+    capability: api.capability ?? 'unknown',
+    priceUsdc: Number(api.priceUsdcBaseUnits),
+    pricingModel: PRICING_MODELS[api.pricingModel] ?? 'per_request',
+    sla: api.slaParams ?? {
+      maxLatencyMs: undefined,
+      minUptimePct: undefined,
+      responseFormat: undefined,
+      jsonSchemaUri: undefined,
+      customParams: [],
+    },
+    reputation: api.reputationScore ?? 0,
+    jobsCompleted: api.jobsCompleted ?? 0,
+    isActive: api.isActive,
+    owner: api.owner,
+    avatar: meta.avatar,
+    endpoint: api.endpoint ?? undefined,
+  };
+}
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
@@ -98,15 +141,13 @@ export async function fetchListings(query: ListingsQuery = {}): Promise<Paginate
   const qs = params.toString();
   try {
     const result = await apiFetch<
-      | { data?: Listing[]; pagination?: { total?: number }; items?: Listing[]; total?: number }
-      | Listing[]
+      | { data?: ApiListing[]; pagination?: { total?: number } }
+      | ApiListing[]
     >(`/listings${qs ? `?${qs}` : ''}`);
-    // Handle paginated `{data, pagination}` (current API), legacy `{items, total}`, or raw array
-    if (Array.isArray(result)) {
-      return { items: result, total: result.length };
-    }
-    const items = result.data ?? result.items ?? [];
-    const total = result.pagination?.total ?? result.total ?? items.length;
+    const raw = Array.isArray(result) ? result : (result.data ?? []);
+    const items = raw.map(toListing);
+    const total =
+      (Array.isArray(result) ? result.length : result.pagination?.total) ?? items.length;
     return { items, total };
   } catch {
     return { items: [], total: 0 };
@@ -115,7 +156,9 @@ export async function fetchListings(query: ListingsQuery = {}): Promise<Paginate
 
 export async function fetchListing(pubkey: string): Promise<Listing | null> {
   try {
-    return await apiFetch<Listing>(`/listings/${pubkey}`);
+    const result = await apiFetch<ApiListing | { data: ApiListing }>(`/listings/${pubkey}`);
+    const api = 'data' in result ? result.data : (result as ApiListing);
+    return toListing(api);
   } catch {
     return null;
   }
