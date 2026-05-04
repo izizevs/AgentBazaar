@@ -1,0 +1,14 @@
+name = "agentbazaar-gm-agent"
+main = "src/index.ts"
+compatibility_date = "2026-01-01"
+compatibility_flags = ["nodejs_compat"]
+workers_dev = true
+preview_urls = false
+
+[vars]
+DISCOVERY_API_URL = "https://agentbazaar-api.r-443.workers.dev"
+
+# Secrets (set via `wrangler secret put <KEY>`):
+#   RPC_URL              — Helius devnet RPC URL with api-key (public RPC IP-blocks CF Workers)
+#   PROVIDER_SECRET_KEY  — base58-encoded Solana keypair secretKey (64 bytes)
+#   PINATA_JWT           — JWT for IPFS metadata + result uploads
