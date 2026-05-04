@@ -9,9 +9,9 @@
  */
 import { Buffer } from 'node:buffer';
 import { execFileSync } from 'node:child_process';
+import { BazaarRegistryIDL } from '@agentbazaar/idl';
 import { AnchorProvider, Program } from '@coral-xyz/anchor';
 import { Connection, Keypair, PublicKey } from '@solana/web3.js';
-import { BazaarRegistryIDL } from '@agentbazaar/idl';
 
 const DEVNET = process.env.HELIUS_API_KEY
   ? `https://devnet.helius-rpc.com/?api-key=${process.env.HELIUS_API_KEY}`

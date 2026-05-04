@@ -29,15 +29,14 @@
  */
 
 import { serve } from '@hono/node-server';
-import { Hono } from 'hono';
 import {
   Connection,
   Keypair,
-  PublicKey,
   type Transaction,
   type VersionedTransaction,
 } from '@solana/web3.js';
 import bs58 from 'bs58';
+import { Hono } from 'hono';
 import { z } from 'zod';
 import { AgentBazaar } from '../src/index.js';
 
@@ -73,9 +72,7 @@ const RequestSchema = z.object({
 
 const app = new Hono();
 
-app.get('/healthz', (c) =>
-  c.json({ ok: true, pubkey: provider.publicKey.toBase58() }),
-);
+app.get('/healthz', (c) => c.json({ ok: true, pubkey: provider.publicKey.toBase58() }));
 
 app.post('/process', async (c) => {
   // 1. Validate request shape
@@ -168,7 +165,9 @@ function makeWallet(kp: Keypair) {
         : (tx as Transaction).partialSign(kp);
       return tx;
     },
-    async signAllTransactions<T extends Transaction | VersionedTransaction>(txs: T[]): Promise<T[]> {
+    async signAllTransactions<T extends Transaction | VersionedTransaction>(
+      txs: T[],
+    ): Promise<T[]> {
       for (const tx of txs) {
         'version' in tx
           ? (tx as VersionedTransaction).sign([kp])

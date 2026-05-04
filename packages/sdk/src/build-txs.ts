@@ -333,13 +333,14 @@ export async function buildConfirmTx(
   const sellerTokenAccount = getAssociatedTokenAddress(resolvedUsdcMint, seller);
   const buyerTokenAccount = getAssociatedTokenAddress(resolvedUsdcMint, input.signerPubkey);
 
-  // biome-ignore lint/suspicious/noExplicitAny: escrow PDA has self-referential seeds; Anchor TS cannot statically resolve it — must be passed explicitly
-  const accts = {
+  const acctsTmp = {
     escrow: input.escrowPubkey,
     sellerTokenAccount,
     buyerTokenAccount,
     listing,
-  } as any;
+  };
+  // biome-ignore lint/suspicious/noExplicitAny: escrow PDA has self-referential seeds; Anchor TS cannot statically resolve it — must be passed explicitly
+  const accts = acctsTmp as any;
   const ix = await program.methods.confirmDelivery(score, []).accounts(accts).instruction();
 
   return wrapIx(connection, input.signerPubkey, ix);

@@ -9,11 +9,13 @@ import 'dotenv/config';
 import { readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import { Connection, Keypair, type Transaction, type VersionedTransaction } from '@solana/web3.js';
 import { AgentBazaar } from '@agentbazaar/sdk';
+import { Connection, Keypair, type Transaction, type VersionedTransaction } from '@solana/web3.js';
 
 function loadMaster(): Keypair {
-  const arr = JSON.parse(readFileSync(join(homedir(), '.config', 'solana', 'id.json'), 'utf8')) as number[];
+  const arr = JSON.parse(
+    readFileSync(join(homedir(), '.config', 'solana', 'id.json'), 'utf8'),
+  ) as number[];
   return Keypair.fromSecretKey(Uint8Array.from(arr));
 }
 
@@ -26,7 +28,9 @@ function makeWallet(kp: Keypair) {
       else (tx as Transaction).partialSign(kp);
       return tx;
     },
-    async signAllTransactions<T extends Transaction | VersionedTransaction>(txs: T[]): Promise<T[]> {
+    async signAllTransactions<T extends Transaction | VersionedTransaction>(
+      txs: T[],
+    ): Promise<T[]> {
       for (const tx of txs) {
         if ('version' in tx) (tx as VersionedTransaction).sign([kp]);
         else (tx as Transaction).partialSign(kp);

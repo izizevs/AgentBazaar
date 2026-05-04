@@ -13,11 +13,6 @@ import { NotImplementedError } from './errors.js';
 import { DEVNET_USDC_MINT } from './escrow-utils.js';
 import { hireAgent } from './hire.js';
 import { registerService } from './register.js';
-import {
-  type VerifyEscrowOptions,
-  type VerifyEscrowResult,
-  verifyEscrow,
-} from './verify-escrow.js';
 import type {
   ConfirmInput,
   DeliverInput,
@@ -29,6 +24,11 @@ import type {
   RegisterResult,
   ServiceProvider,
 } from './types.js';
+import {
+  type VerifyEscrowOptions,
+  type VerifyEscrowResult,
+  verifyEscrow,
+} from './verify-escrow.js';
 
 /**
  * Minimal wallet interface required by the AgentBazaar SDK.
