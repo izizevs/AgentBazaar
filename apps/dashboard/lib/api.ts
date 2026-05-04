@@ -135,8 +135,7 @@ export async function fetchListings(query: ListingsQuery = {}): Promise<Paginate
   const qs = params.toString();
   try {
     const result = await apiFetch<
-      | { data?: ApiListing[]; pagination?: { total?: number } }
-      | ApiListing[]
+      { data?: ApiListing[]; pagination?: { total?: number } } | ApiListing[]
     >(`/listings${qs ? `?${qs}` : ''}`);
     const raw = Array.isArray(result) ? result : (result.data ?? []);
     const items = raw.map(toListing);
