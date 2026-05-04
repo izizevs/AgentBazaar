@@ -2,7 +2,7 @@ import { getSql } from '../db/client.js';
 import type { SlaParams } from '../db/schema.js';
 import { logger } from '../logger.js';
 import type { ServiceListingCreatedData } from './decoder.js';
-import { fetchMetadata } from './fetch-metadata.js';
+import { fetchMetadataWithRetry } from './fetch-metadata.js';
 
 // Default SlaParams when the event doesn't carry SLA data (it's in the
 // instruction args, not the emitted event). Indexer will track future
@@ -49,9 +49,11 @@ export async function onListingCreated(
     ON CONFLICT (pubkey) DO NOTHING
   `;
 
-  // Best-effort IPFS metadata fetch to populate capability, endpoint, and full metadata blob.
-  // Failure leaves columns null; they can be backfilled later by re-indexing.
-  const metadata = await fetchMetadata(metadataUri);
+  // IPFS metadata fetch with bounded retries — covers transient Pinata
+  // propagation lag (typical: 5–30 s for fresh uploads). If still null after
+  // all retries, run scripts/backfill-listing-metadata.ts to recover the row
+  // later without re-indexing the chain.
+  const metadata = await fetchMetadataWithRetry(metadataUri);
   if (metadata) {
     await sql`
       UPDATE service_listings
