@@ -224,6 +224,18 @@ describe('registerService', () => {
 
   // ─── Pinata upload ──────────────────────────────────────────────────────────
 
+  it("uploads to Pinata's 'public' network so the indexer can fetch via gateway.pinata.cloud", async () => {
+    mockPinataSuccess();
+    const wallet = makeWallet();
+    const conn = makeConnection();
+
+    await registerService(conn, wallet, validInput(), PINATA_JWT);
+
+    const [, opts] = mockFetch.mock.calls[0] as [string, RequestInit];
+    const form = opts.body as FormData;
+    expect(form.get('network')).toBe('public');
+  });
+
   it('throws MetadataUploadError when Pinata returns non-ok status', async () => {
     mockFetch.mockResolvedValue({
       ok: false,

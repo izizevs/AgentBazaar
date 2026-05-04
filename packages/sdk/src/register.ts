@@ -34,6 +34,10 @@ async function uploadMetadata(
   const blob = new Blob([JSON.stringify(payload)], { type: 'application/json' });
   const form = new FormData();
   form.append('file', blob, 'metadata.json');
+  // Pinata v3 defaults `network` to 'private' — files are then unreachable via
+  // the public gateway.pinata.cloud, which the indexer needs for IPFS metadata
+  // fetch. Always upload to the public network so listings are indexable.
+  form.append('network', 'public');
 
   const res = await fetch('https://uploads.pinata.cloud/v3/files', {
     method: 'POST',
