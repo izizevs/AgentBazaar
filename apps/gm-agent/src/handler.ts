@@ -1,8 +1,14 @@
-import { Connection, Keypair, PublicKey, type Transaction, type VersionedTransaction } from '@solana/web3.js';
+import { AgentBazaar } from '@agentbazaar/sdk';
+import {
+  Connection,
+  Keypair,
+  PublicKey,
+  type Transaction,
+  type VersionedTransaction,
+} from '@solana/web3.js';
 import bs58 from 'bs58';
 import type { Context } from 'hono';
 import { z } from 'zod';
-import { AgentBazaar } from '@agentbazaar/sdk';
 import type { Bindings } from './types.js';
 
 const RequestSchema = z.object({
@@ -82,7 +88,9 @@ function makeWallet(kp: Keypair) {
       }
       return tx;
     },
-    async signAllTransactions<T extends Transaction | VersionedTransaction>(txs: T[]): Promise<T[]> {
+    async signAllTransactions<T extends Transaction | VersionedTransaction>(
+      txs: T[],
+    ): Promise<T[]> {
       for (const tx of txs) {
         if ('version' in tx) {
           (tx as VersionedTransaction).sign([kp]);

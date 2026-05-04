@@ -10,8 +10,8 @@
  */
 import 'dotenv/config';
 import { readFileSync } from 'node:fs';
-import { Connection, Keypair, type Transaction, type VersionedTransaction } from '@solana/web3.js';
 import { AgentBazaar } from '@agentbazaar/sdk';
+import { Connection, Keypair, type Transaction, type VersionedTransaction } from '@solana/web3.js';
 
 const KEYPAIR_PATH = '/workspace/secrets/gm-agent-keypair.json';
 const WORKER_URL = 'https://agentbazaar-gm-agent.r-443.workers.dev';
@@ -30,7 +30,9 @@ function makeWallet(kp: Keypair) {
       else (tx as Transaction).partialSign(kp);
       return tx;
     },
-    async signAllTransactions<T extends Transaction | VersionedTransaction>(txs: T[]): Promise<T[]> {
+    async signAllTransactions<T extends Transaction | VersionedTransaction>(
+      txs: T[],
+    ): Promise<T[]> {
       for (const tx of txs) {
         if ('version' in tx) (tx as VersionedTransaction).sign([kp]);
         else (tx as Transaction).partialSign(kp);
@@ -59,7 +61,8 @@ async function main() {
   const result = await bazaar.register({
     name: 'GMAgent',
     capability: 'greeting',
-    description: "Send 'GMx<n>' (e.g. 'GMx3') and receive 'GM' repeated n times. Trivial demo agent — first 3rd-party reference impl on AgentBazaar.",
+    description:
+      "Send 'GMx<n>' (e.g. 'GMx3') and receive 'GM' repeated n times. Trivial demo agent — first 3rd-party reference impl on AgentBazaar.",
     endpoint: WORKER_URL,
     avatar: 'https://api.dicebear.com/7.x/shapes/svg?seed=GMAgent&backgroundColor=ffeb3b',
     priceUsdc: 100_000n,

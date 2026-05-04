@@ -10,11 +10,13 @@ import 'dotenv/config';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import { Connection, Keypair, type Transaction, type VersionedTransaction } from '@solana/web3.js';
 import { AgentBazaar } from '@agentbazaar/sdk';
+import { Connection, Keypair, type Transaction, type VersionedTransaction } from '@solana/web3.js';
 
 function loadMaster(): Keypair {
-  const arr = JSON.parse(readFileSync(join(homedir(), '.config', 'solana', 'id.json'), 'utf8')) as number[];
+  const arr = JSON.parse(
+    readFileSync(join(homedir(), '.config', 'solana', 'id.json'), 'utf8'),
+  ) as number[];
   return Keypair.fromSecretKey(Uint8Array.from(arr));
 }
 
@@ -27,7 +29,9 @@ function makeWallet(kp: Keypair) {
       else (tx as Transaction).partialSign(kp);
       return tx;
     },
-    async signAllTransactions<T extends Transaction | VersionedTransaction>(txs: T[]): Promise<T[]> {
+    async signAllTransactions<T extends Transaction | VersionedTransaction>(
+      txs: T[],
+    ): Promise<T[]> {
       for (const tx of txs) {
         if ('version' in tx) (tx as VersionedTransaction).sign([kp]);
         else (tx as Transaction).partialSign(kp);
@@ -89,7 +93,9 @@ async function main() {
   writeFileSync('/tmp/gm-escrow.json', JSON.stringify(out, null, 2));
   console.log('Saved escrow handle to /tmp/gm-escrow.json');
   console.log('\nNext: POST work to the agent:');
-  console.log(`  curl -X POST ${gm.endpoint}/process \\\n    -H 'Content-Type: application/json' \\\n    -d '{"escrowPubkey":"${handle.escrowPda.toBase58()}","input":"GMx3"}'`);
+  console.log(
+    `  curl -X POST ${gm.endpoint}/process \\\n    -H 'Content-Type: application/json' \\\n    -d '{"escrowPubkey":"${handle.escrowPda.toBase58()}","input":"GMx3"}'`,
+  );
 }
 
 main().catch((err) => {

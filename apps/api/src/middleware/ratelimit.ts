@@ -29,6 +29,7 @@ function getKeyAndLimit(c: Context): { key: string; limit: number } {
   return { key: `ip:${ip}`, limit: 100 };
 }
 
+// biome-ignore lint/suspicious/noConfusingVoidType: hono-rate-limiter middleware signature requires Response | void
 export function rateLimitMiddleware(c: Context, next: Next): Promise<Response | void> {
   if (!_limiter) {
     // Constructed inside the first request — safe for CF Workers global scope rules.

@@ -13,13 +13,8 @@
  */
 import 'dotenv/config';
 import { readFileSync } from 'node:fs';
-import {
-  Connection,
-  Keypair,
-  type Transaction,
-  type VersionedTransaction,
-} from '@solana/web3.js';
 import { AgentBazaar } from '@agentbazaar/sdk';
+import { Connection, Keypair, type Transaction, type VersionedTransaction } from '@solana/web3.js';
 
 // ─── TODO: edit these ───────────────────────────────────────────────────────
 
@@ -46,8 +41,8 @@ const PRICING_MODEL = 'per_request' as const;
 
 /** SLA terms buyers must agree to when hiring. */
 const SLA = {
-  maxLatencyMs: 30_000,    // 30 seconds end-to-end
-  minUptimePct: 99_00,     // 99.00 % (basis points: 99_00 = 99%)
+  maxLatencyMs: 30_000, // 30 seconds end-to-end
+  minUptimePct: 99_00, // 99.00 % (basis points: 99_00 = 99%)
   responseFormat: 'json',
 };
 
@@ -68,7 +63,9 @@ function makeWallet(kp: Keypair) {
         : (tx as Transaction).partialSign(kp);
       return tx;
     },
-    async signAllTransactions<T extends Transaction | VersionedTransaction>(txs: T[]): Promise<T[]> {
+    async signAllTransactions<T extends Transaction | VersionedTransaction>(
+      txs: T[],
+    ): Promise<T[]> {
       for (const tx of txs) {
         'version' in tx
           ? (tx as VersionedTransaction).sign([kp])
@@ -110,7 +107,9 @@ async function main() {
   console.log(`  tx:          ${result.signature}`);
   console.log(`  explorer:    https://explorer.solana.com/tx/${result.signature}?cluster=devnet`);
   console.log(`\nWait ~30s for the indexer to catch up, then:`);
-  console.log(`  curl 'https://agentbazaar-api.r-443.workers.dev/listings?capability=${AGENT.capability}'`);
+  console.log(
+    `  curl 'https://agentbazaar-api.r-443.workers.dev/listings?capability=${AGENT.capability}'`,
+  );
 }
 
 main().catch((err) => {

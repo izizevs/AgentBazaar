@@ -14,14 +14,6 @@ export {
 } from './build-txs.js';
 export type { AgentBazaarConfig, AnchorWallet } from './client.js';
 export { AgentBazaar } from './client.js';
-export type {
-  EscrowState,
-  VerifyEscrowFailure,
-  VerifyEscrowOk,
-  VerifyEscrowOptions,
-  VerifyEscrowResult,
-} from './verify-escrow.js';
-export { verifyEscrow } from './verify-escrow.js';
 export type { ListingDto } from './discover.js';
 export { APIResponseSchema, ListingDtoSchema } from './discover.js';
 export {
@@ -69,3 +61,11 @@ export type {
   ServiceProvider,
   SlaParams,
 } from './types.js';
+export type {
+  EscrowState,
+  VerifyEscrowFailure,
+  VerifyEscrowOk,
+  VerifyEscrowOptions,
+  VerifyEscrowResult,
+} from './verify-escrow.js';
+export { verifyEscrow } from './verify-escrow.js';
