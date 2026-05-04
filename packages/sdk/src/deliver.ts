@@ -1,4 +1,5 @@
-import type { Connection } from '@solana/web3.js';
+import { createAssociatedTokenAccountIdempotentInstruction } from '@solana/spl-token';
+import type { Connection, TransactionInstruction } from '@solana/web3.js';
 import { PublicKey } from '@solana/web3.js';
 import type { AnchorWallet } from './client.js';
 import {
@@ -50,10 +51,29 @@ export async function deliverJob(
 
   // biome-ignore lint/suspicious/noExplicitAny: escrow PDA has self-referential seeds; Anchor TS cannot statically resolve it — must be passed explicitly
   const accts = { escrow: escrowPda, sellerTokenAccount } as any;
-  const ix = await program.methods
+  const deliverIx = await program.methods
     .submitDelivery(input.resultUri, Array.from(input.resultHash) as number[])
     .accounts(accts)
     .instruction();
 
-  return sendWithRetry(connection, wallet, ix);
+  // The escrow program requires `seller_token_account` to be already initialized
+  // (it transfers USDC into it during confirm/timeout-claim). For a fresh agent
+  // the ATA doesn't exist yet, so the very first delivery would fail with
+  // AccountNotInitialized. We prepend a create-idempotent ix so the seller pays
+  // the ~0.002 SOL ATA rent once, atomically with the first delivery.
+  const ixs: TransactionInstruction[] = [];
+  const ataInfo = await connection.getAccountInfo(sellerTokenAccount);
+  if (!ataInfo) {
+    ixs.push(
+      createAssociatedTokenAccountIdempotentInstruction(
+        wallet.publicKey,
+        sellerTokenAccount,
+        wallet.publicKey,
+        usdcMint,
+      ),
+    );
+  }
+  ixs.push(deliverIx);
+
+  return sendWithRetry(connection, wallet, ixs);
 }

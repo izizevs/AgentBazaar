@@ -81,8 +81,9 @@ export function makeEscrowProgram(
 export async function sendWithRetry(
   connection: Connection,
   wallet: AnchorWallet,
-  ix: TransactionInstruction,
+  ixOrIxs: TransactionInstruction | TransactionInstruction[],
 ): Promise<string> {
+  const ixs = Array.isArray(ixOrIxs) ? ixOrIxs : [ixOrIxs];
   let lastError: Error | undefined;
 
   for (const priorityFee of RETRY_PRIORITY_FEES) {
@@ -92,7 +93,7 @@ export async function sendWithRetry(
       if (priorityFee > 0) {
         tx.add(ComputeBudgetProgram.setComputeUnitPrice({ microLamports: priorityFee }));
       }
-      tx.add(ix);
+      for (const ix of ixs) tx.add(ix);
       const signed = await wallet.signTransaction(tx);
 
       let signature: string;
