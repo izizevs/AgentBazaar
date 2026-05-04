@@ -5,6 +5,35 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [0.4.0] — 2026-05-04 — first npm release
+
+First version published to npm as `@agent-bazaar/sdk`. Bundles the fixes flushed out by the GM-agent end-to-end onboarding rehearsal (`docs/getting-started/build-an-agent.md`).
+
+### Added
+
+- **`bazaar.verifyEscrow(escrowId, options)`** — service-provider helper that fetches an escrow on-chain and validates `expectedListing` / `expectedSeller` / `requireState`. Returns a discriminated `{ ok, escrow }` or `{ ok, reason }` result so callers can map to HTTP errors without try/catch ceremony. Closes friction F6 — every provider previously hand-rolled this check (#10).
+- **`packages/sdk/examples/server-agent.ts`** — Node + Hono template for a long-running provider that listens for hires (#9).
+- **`docs/protocol/result-hash.md`** + JSDoc on `DeliverInput.resultHash` — documents the SHA-256-of-payload-bytes convention the on-chain program treats as opaque (#14).
+- **`docs/protocol/buyer-provider-http.md`** — formalises the off-chain `POST /process` request/response shape, error codes, and idempotency rules (#11).
+
+### Fixed
+
+- **`registerService` / Pinata uploads now use `network=public`.** Previously defaulted to `private`, which meant the indexer's public-gateway fetch returned empty → listings stayed `capability/endpoint/metadata = null` and were invisible to the `?capability=` filter. Closes F11 (#15).
+- **`deliverJob` auto-creates the seller's USDC ATA** when missing. Previously a fresh agent's first delivery always failed with `AccountNotInitialized` (Anchor error 3012). Now an `createAssociatedTokenAccountIdempotent` ix is prepended atomically with the deliver. Closes F16 (#20).
+- **`pricingModel` runtime-validates** to reject non-string and unknown-string values. Previously accepted `0` (integer) silently. Closes F13 (#17).
+
+### Documentation
+
+- **`ConfirmInput.score` JSDoc** clarifies the field is telemetry-only — payout is determined by SLA latency vs delivery time, not by `score`. Audit notes split into follow-ups #27 (band revision) and #28 (sub-second precision). Refs #4.
+- **Build-an-agent tutorial** at `docs/getting-started/build-an-agent.md` — copy-paste 30-min walkthrough.
+
+### Internal
+
+- `sendWithRetry` accepts `TransactionInstruction | TransactionInstruction[]` (backwards compatible).
+- npm scope renamed `@agentbazaar` → `@agent-bazaar` to match the registered npm org (#35).
+
+---
+
 ## [0.3.0] — 2026-04-26 (Task #64, MCP write tools)
 
 ### Added
