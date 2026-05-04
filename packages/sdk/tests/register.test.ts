@@ -177,6 +177,30 @@ describe('registerService', () => {
     }
   });
 
+  it('throws ValidationError when pricingModel is a number (not a valid union string)', async () => {
+    mockPinataSuccess();
+    const wallet = makeWallet();
+    const conn = makeConnection();
+    // biome-ignore lint/suspicious/noExplicitAny: deliberately testing runtime guard against TS-untyped callers
+    const input = { ...validInput(), pricingModel: 0 as any };
+
+    await expect(registerService(conn, wallet, input, PINATA_JWT)).rejects.toBeInstanceOf(
+      ValidationError,
+    );
+  });
+
+  it('throws ValidationError when pricingModel is an unknown string', async () => {
+    mockPinataSuccess();
+    const wallet = makeWallet();
+    const conn = makeConnection();
+    // biome-ignore lint/suspicious/noExplicitAny: deliberately testing runtime guard against TS-untyped callers
+    const input = { ...validInput(), pricingModel: 'monthly' as any };
+
+    await expect(registerService(conn, wallet, input, PINATA_JWT)).rejects.toBeInstanceOf(
+      ValidationError,
+    );
+  });
+
   it('throws ValidationError when priceUsdc is negative', async () => {
     const wallet = makeWallet();
     const conn = makeConnection();
