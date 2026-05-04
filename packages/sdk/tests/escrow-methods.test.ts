@@ -26,6 +26,22 @@ const mockConfirmDelivery = vi.fn();
 const mockClaimTimeout = vi.fn();
 const mockOpenDispute = vi.fn();
 
+const mockCreateAtaIx = vi.fn();
+vi.mock('@solana/spl-token', async (importOriginal) => {
+  const original = await importOriginal<typeof import('@solana/spl-token')>();
+  return {
+    ...original,
+    createAssociatedTokenAccountIdempotentInstruction: (...args: unknown[]) => {
+      mockCreateAtaIx(...args);
+      return new TransactionInstruction({
+        keys: [],
+        programId: new PublicKey('11111111111111111111111111111111'),
+        data: Buffer.alloc(0),
+      });
+    },
+  };
+});
+
 vi.mock('@coral-xyz/anchor', () => {
   class AnchorProvider {}
   const makeChain = (mockIx: ReturnType<typeof vi.fn>) => () => ({
@@ -65,12 +81,15 @@ const ESCROW_PDA = new PublicKey('GJRgCCqkYvAezidpdd3i4p4kRRfJnM1EfGfgqYgchQqd')
 const SELLER_PK = Keypair.generate().publicKey;
 const LISTING_PK = Keypair.generate().publicKey;
 
+// Default: ATA exists (`{}` is truthy non-null). Override to `null` in tests
+// that exercise the create-ATA-idempotent path.
 function makeConnection() {
   return {
     getLatestBlockhash: vi.fn().mockResolvedValue({
       blockhash: MOCK_BLOCKHASH,
       lastValidBlockHeight: 100,
     }),
+    getAccountInfo: vi.fn().mockResolvedValue({}),
     sendRawTransaction: vi.fn().mockResolvedValue('mocksig-escrow'),
     confirmTransaction: vi.fn().mockResolvedValue({ value: { err: null } }),
   } as unknown as Connection;
@@ -168,6 +187,25 @@ describe('deliverJob', () => {
       resultHash: VALID_HASH,
     });
     expect(sig).toBe('mocksig-escrow');
+  });
+
+  it('prepends createAssociatedTokenAccountIdempotentInstruction when seller ATA missing', async () => {
+    const conn = makeConnection();
+    (conn.getAccountInfo as ReturnType<typeof vi.fn>).mockResolvedValue(null);
+    await deliverJob(conn, makeWallet(), ESCROW_PDA.toBase58(), {
+      resultUri: 'https://x.com',
+      resultHash: VALID_HASH,
+    });
+    expect(mockCreateAtaIx).toHaveBeenCalledOnce();
+  });
+
+  it('does NOT prepend create-ATA ix when seller ATA already exists', async () => {
+    const conn = makeConnection(); // default returns {} (truthy)
+    await deliverJob(conn, makeWallet(), ESCROW_PDA.toBase58(), {
+      resultUri: 'https://x.com',
+      resultHash: VALID_HASH,
+    });
+    expect(mockCreateAtaIx).not.toHaveBeenCalled();
   });
 
   it('throws TransactionFailedError after all retries fail', async () => {
