@@ -136,9 +136,21 @@ export interface DeliverInput {
 // ─── confirm() ──────────────────────────────────────────────────────────────
 
 export interface ConfirmInput {
-  /** Reputation score awarded (0–100). */
+  /**
+   * Reputation score (0–100) — telemetry only.
+   *
+   * **Important:** the on-chain `bazaar-escrow::confirm_delivery` handler
+   * accepts this value but does **not** use it for payout computation. Payout
+   * split is determined entirely by SLA latency vs. delivery time (see
+   * `compute_severity` in the escrow program). The score is emitted in the
+   * `SLAReport` event for off-chain reputation aggregation only — it has
+   * **no economic effect** on this transaction.
+   *
+   * Pass any integer 0–100 to attach a star-rating-style signal to the
+   * delivery for the marketplace's reputation display.
+   */
   score: number;
-  /** Optional tags describing outcome quality. */
+  /** Optional tags describing outcome quality (each ≤ 32 chars, ≤ 8 tags). */
   tags?: string[];
 }
 
