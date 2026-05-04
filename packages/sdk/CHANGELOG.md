@@ -1,4 +1,4 @@
-# Changelog — @agentbazaar/sdk
+# Changelog — @agent-bazaar/sdk
 
 All notable changes to this package are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
@@ -24,7 +24,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `slaSeverity` (0–3) maps to reputation scores 100/75/50/25.  If `listingPubkey` and
   `sellerPubkey` are omitted the function fetches them from chain via the escrow account.
 
-All four builders are exported as named exports from `@agentbazaar/sdk` along with their input
+All four builders are exported as named exports from `@agent-bazaar/sdk` along with their input
 and result types.  Existing `registerService`, `hireAgent`, `deliverJob`, `confirmDelivery` send
 functions are unchanged.
 
@@ -92,7 +92,7 @@ to expose write tools without ever holding private keys.
 - `DegradedDiscoveryError<TListing>` gains a `rpcResults: readonly TListing[]` property.
   Existing code that only catches the error and does not inspect `rpcResults` is unaffected.
 
-- `APIResponseSchema` and `ListingDtoSchema` exported from `@agentbazaar/sdk` (and from
+- `APIResponseSchema` and `ListingDtoSchema` exported from `@agent-bazaar/sdk` (and from
   `packages/sdk/src/discover.ts`) for contract testing.
 
 ### Migration
@@ -185,4 +185,4 @@ try {
 - `sendWithRetry` with 3-attempt priority-fee escalation (`0 → 100k → 500k` micro-lamports).
 - Graceful Discovery API fallback to direct RPC.
 - Zod-based client-side input validation before transaction submission.
-- IDL-derived types via `@agentbazaar/idl` workspace package.
+- IDL-derived types via `@agent-bazaar/idl` workspace package.

@@ -1,6 +1,6 @@
-import type { BazaarRegistry } from '@agentbazaar/idl';
-import { BazaarRegistryIDL, computeCapabilityHash } from '@agentbazaar/idl';
-import { clusterFromConnection, PROGRAM_IDS } from '@agentbazaar/sdk';
+import type { BazaarRegistry } from '@agent-bazaar/idl';
+import { BazaarRegistryIDL, computeCapabilityHash } from '@agent-bazaar/idl';
+import { clusterFromConnection, PROGRAM_IDS } from '@agent-bazaar/sdk';
 import { AnchorProvider, Program } from '@coral-xyz/anchor';
 import {
   type Connection,
@@ -9,7 +9,7 @@ import {
   type VersionedTransaction,
 } from '@solana/web3.js';
 
-// Re-export so test files don't import directly from @agentbazaar/idl.
+// Re-export so test files don't import directly from @agent-bazaar/idl.
 export { computeCapabilityHash };
 
 /**

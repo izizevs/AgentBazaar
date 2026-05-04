@@ -1,5 +1,5 @@
-import type { BazaarRegistry } from '@agentbazaar/idl';
-import { BazaarRegistryIDL } from '@agentbazaar/idl';
+import type { BazaarRegistry } from '@agent-bazaar/idl';
+import { BazaarRegistryIDL } from '@agent-bazaar/idl';
 import { AnchorProvider, Program } from '@coral-xyz/anchor';
 import { type Connection, PublicKey } from '@solana/web3.js';
 import { z } from 'zod';

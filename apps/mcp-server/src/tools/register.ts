@@ -1,7 +1,7 @@
 // bazaar_register — build an unsigned register_service transaction.
 // The MCP server is stateless and non-custodial: it constructs the tx and
 // returns it base64-encoded for the LLM client to sign + broadcast.
-import { buildRegisterTx } from '@agentbazaar/sdk';
+import { buildRegisterTx } from '@agent-bazaar/sdk';
 import { Connection, PublicKey } from '@solana/web3.js';
 import { z } from 'zod';
 

@@ -26,7 +26,7 @@ import {
   type ServiceProvider,
   TransactionFailedError,
   ValidationError,
-} from '@agentbazaar/sdk';
+} from '@agent-bazaar/sdk';
 import { Keypair } from '@solana/web3.js';
 
 // ── Config ────────────────────────────────────────────────────────────────────

@@ -8,15 +8,15 @@
  *   - Metadata fields are correct
  *   - Input validation errors surface as MCP error responses (isError: true)
  */
-import { buildConfirmTx, buildDeliverTx, buildHireTx, buildRegisterTx } from '@agentbazaar/sdk';
+import { buildConfirmTx, buildDeliverTx, buildHireTx, buildRegisterTx } from '@agent-bazaar/sdk';
 import { PublicKey, Transaction, TransactionInstruction } from '@solana/web3.js';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-// ─── Mock @agentbazaar/sdk buildTx functions ──────────────────────────────────
+// ─── Mock @agent-bazaar/sdk buildTx functions ──────────────────────────────────
 // Note: vi.mock factories are hoisted; they MUST NOT reference module-level
 // variables declared after the mock call. Use inline values only.
 
-vi.mock('@agentbazaar/sdk', () => ({
+vi.mock('@agent-bazaar/sdk', () => ({
   buildRegisterTx: vi.fn(),
   buildHireTx: vi.fn(),
   buildDeliverTx: vi.fn(),

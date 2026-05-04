@@ -2,7 +2,7 @@
  * E2E: full escrow happy path — register → discover → hire → deliver → confirm.
  * Hits devnet directly. Guarded by E2E=true env var.
  *
- * Run: E2E=true pnpm --filter @agentbazaar/tests test:e2e
+ * Run: E2E=true pnpm --filter @agent-bazaar/tests test:e2e
  *
  * Prerequisites:
  *   SOLANA_RPC_URL — Helius devnet endpoint (with API key)
@@ -16,8 +16,8 @@
 import { readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import type { ServiceProvider } from '@agentbazaar/sdk';
-import { AgentBazaar, DegradedDiscoveryError } from '@agentbazaar/sdk';
+import type { ServiceProvider } from '@agent-bazaar/sdk';
+import { AgentBazaar, DegradedDiscoveryError } from '@agent-bazaar/sdk';
 import { Wallet } from '@coral-xyz/anchor';
 import { getAssociatedTokenAddressSync } from '@solana/spl-token';
 import { Connection, Keypair, type PublicKey } from '@solana/web3.js';

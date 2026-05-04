@@ -2,7 +2,7 @@
  * E2E: timeout path — register → hire → deliver → wait → claimTimeout.
  * Hits devnet directly. Guarded by E2E=true env var.
  *
- * Run: E2E=true pnpm --filter @agentbazaar/tests test:e2e
+ * Run: E2E=true pnpm --filter @agent-bazaar/tests test:e2e
  *
  * Uses a 30-second timeout and a real wait. Would have caught H1 immediately:
  * if the deadline were set as an absolute timestamp (~year 2080) instead of
@@ -15,7 +15,7 @@
 import { readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import { AgentBazaar, EscrowNotExpiredError } from '@agentbazaar/sdk';
+import { AgentBazaar, EscrowNotExpiredError } from '@agent-bazaar/sdk';
 import { Wallet } from '@coral-xyz/anchor';
 import { getAssociatedTokenAddressSync } from '@solana/spl-token';
 import { Connection, Keypair, type PublicKey } from '@solana/web3.js';

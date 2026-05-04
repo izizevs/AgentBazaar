@@ -1,5 +1,5 @@
 {
-  "name": "@agentbazaar/idl",
+  "name": "@agent-bazaar/idl",
   "version": "0.1.0",
   "private": true,
   "description": "Anchor IDL JSON + TypeScript types for AgentBazaar on-chain programs.",

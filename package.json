@@ -18,11 +18,11 @@
     "clean": "turbo run clean && rm -rf node_modules",
     "build:programs": "cd programs && anchor build",
     "test:programs": "cd programs && anchor test",
-    "demo": "pnpm --filter @agentbazaar/sdk build && tsx scripts/demo.ts"
+    "demo": "pnpm --filter @agent-bazaar/sdk build && tsx scripts/demo.ts"
   },
   "dependencies": {
-    "@agentbazaar/idl": "workspace:*",
-    "@agentbazaar/sdk": "workspace:*",
+    "@agent-bazaar/idl": "workspace:*",
+    "@agent-bazaar/sdk": "workspace:*",
     "@coral-xyz/anchor": "0.31.1",
     "@solana/spl-token": "^0.4.9",
     "@solana/web3.js": "^1.95.0",

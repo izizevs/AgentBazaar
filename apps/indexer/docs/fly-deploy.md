@@ -119,7 +119,7 @@ flyctl secrets set NEW_SECRET="value" --app agentbazaar-indexer
 | Symptom | Fix |
 |---|---|
 | `Cannot find module '...dist/index.js'` | Entry point mismatch — verify `CMD` in Dockerfile matches tsc `outDir` + `rootDir` |
-| `ERR_MODULE_NOT_FOUND` for `@agentbazaar/idl` | IDL package not built to `dist/` — check builder step `RUN cd packages/idl && npx tsc` |
+| `ERR_MODULE_NOT_FOUND` for `@agent-bazaar/idl` | IDL package not built to `dist/` — check builder step `RUN cd packages/idl && npx tsc` |
 | Health check warning in `flyctl status` | Machine is starting or crashed — run `flyctl logs` to diagnose |
 | `401 Unauthorized` in webhook handler | `HELIUS_WEBHOOK_SECRET` secret doesn't match Helius dashboard auth header |
 | Machine in `stopped` state | App crashed on startup — check logs; machine will NOT auto-restart after 10 failures |
@@ -130,8 +130,8 @@ flyctl secrets set NEW_SECRET="value" --app agentbazaar-indexer
 
 The Dockerfile uses a **two-stage build** from the monorepo root:
 
-- **Stage 1 (builder):** pnpm installs full deps, builds `@agentbazaar/idl` (tsc) then
-  `@agentbazaar/indexer` (tsc). Both must be compiled because the IDL package ships
+- **Stage 1 (builder):** pnpm installs full deps, builds `@agent-bazaar/idl` (tsc) then
+  `@agent-bazaar/indexer` (tsc). Both must be compiled because the IDL package ships
   TypeScript source only and Node ESM cannot load `.ts` files at runtime.
 - **Stage 2 (runtime):** copies compiled `dist/` from both packages, installs
   production deps only, patches IDL `package.json` exports to point to `dist/` so

@@ -32,8 +32,8 @@
 import type { LookupAddress, LookupOptions } from 'node:dns';
 import { lookup as dnsLookup } from 'node:dns/promises';
 import https from 'node:https';
-import type { Metadata } from '@agentbazaar/idl';
-import { MetadataSchema } from '@agentbazaar/idl';
+import type { Metadata } from '@agent-bazaar/idl';
+import { MetadataSchema } from '@agent-bazaar/idl';
 import * as ipaddr from 'ipaddr.js';
 import { logger } from '../logger.js';
 import { safeLogUrl } from '../util/safe-log-url.js';

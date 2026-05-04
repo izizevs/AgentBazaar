@@ -1,5 +1,5 @@
 {
-  "name": "@agentbazaar/indexer",
+  "name": "@agent-bazaar/indexer",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -16,7 +16,7 @@
     "node": "22.x"
   },
   "dependencies": {
-    "@agentbazaar/idl": "workspace:*",
+    "@agent-bazaar/idl": "workspace:*",
     "@coral-xyz/anchor": "0.31.1",
     "@hono/node-server": "^1.13.7",
     "bs58": "^6.0.0",

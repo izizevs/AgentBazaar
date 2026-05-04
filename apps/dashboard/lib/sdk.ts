@@ -3,8 +3,8 @@
 // AgentBazaar SDK singleton for client-side use
 // Lazy-initialized when wallet is connected
 
-import type { AnchorWallet } from '@agentbazaar/sdk';
-import { AgentBazaar } from '@agentbazaar/sdk';
+import type { AnchorWallet } from '@agent-bazaar/sdk';
+import { AgentBazaar } from '@agent-bazaar/sdk';
 import { Connection } from '@solana/web3.js';
 import { RPC_ENDPOINT } from './cluster';
 
