@@ -1,0 +1,26 @@
+{
+  "name": "@agentbazaar/gm-agent",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "build": "tsc --noEmit",
+    "typecheck": "tsc --noEmit",
+    "deploy": "wrangler deploy",
+    "lint": "biome check ."
+  },
+  "dependencies": {
+    "@agentbazaar/sdk": "workspace:*",
+    "@coral-xyz/anchor": "0.31.1",
+    "@solana/web3.js": "^1.95.0",
+    "bs58": "^6.0.0",
+    "hono": "^4.7.0",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20241205.0",
+    "typescript": "6.0.3",
+    "wrangler": "^4.0.0"
+  }
+}

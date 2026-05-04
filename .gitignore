@@ -28,6 +28,7 @@ coverage
 # Solana keys / localnet artifacts
 *.keypair.json
 **/*-keypair.json
+secrets/
 
 # OS / editor
 .DS_Store
