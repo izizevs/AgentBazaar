@@ -11,10 +11,10 @@
 - `ServiceListing` PDA: `[b"listing", owner, capability_hash]`. Inline `SlaParams`. `ServiceListingCreated` / `ServiceListingUpdated` events.
 - 14/14 instruction tests pass.
 - Deployed to **devnet**: `GJRgCCqkYvAezidpdd3i4p4kRRfJnM1EfGfgqYgchQqd`. Upgrade authority on a single keypair (M1 gate: transfer to Squads 2-of-3 multisig before any value flows through escrow).
-- IDL + TS types exported as `@agentbazaar/idl` workspace package.
+- IDL + TS types exported as `@agent-bazaar/idl` workspace package.
 
 ### SDK (sdk-eng)
-- `@agentbazaar/sdk` published-shape (npm publish dry-run validated; not yet published to registry).
+- `@agent-bazaar/sdk` published-shape (npm publish dry-run validated; not yet published to registry).
 - `bazaar.register()` — Pinata metadata upload, capability hash, register tx with retry + priority fee escalation.
 - `bazaar.discover()` — Discovery API primary path with `AbortSignal.timeout(10s)` + fallback to `getProgramAccounts` RPC. Zod runtime validation of API responses (M1 mainnet hardening landed).
 - Error hierarchy: `BazaarError` base + 11 specialized classes (`InsufficientFundsError`, `MetadataUploadError`, `DuplicateListingError`, `TransactionFailedError`, `DiscoveryAPIError`, `RPCFallbackFailedError`, `WalletNotConnectedError`, `IDLMismatchError`, `ValidationError`, `DegradedDiscoveryError`).
@@ -29,7 +29,7 @@
 - Integration tests against live Postgres (gated on `INTEGRATION=true`).
 
 ### Tests (qa-test-eng)
-- `@agentbazaar/tests` workspace with `fixtures/`, `helpers/`, `mocks/`, `e2e/`.
+- `@agent-bazaar/tests` workspace with `fixtures/`, `helpers/`, `mocks/`, `e2e/`.
 - E2E happy path on devnet: `register()` → on-chain PDA assertion → `discover()` via RPC fallback finds the listing. 4/4 pass.
 
 ### Security (security-auditor)

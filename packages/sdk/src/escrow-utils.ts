@@ -1,5 +1,5 @@
-import type { BazaarEscrow } from '@agentbazaar/idl';
-import { BazaarEscrowIDL } from '@agentbazaar/idl';
+import type { BazaarEscrow } from '@agent-bazaar/idl';
+import { BazaarEscrowIDL } from '@agent-bazaar/idl';
 import { AnchorProvider, Program } from '@coral-xyz/anchor';
 import { ASSOCIATED_TOKEN_PROGRAM_ID, TOKEN_PROGRAM_ID } from '@solana/spl-token';
 import {

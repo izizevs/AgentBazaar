@@ -44,7 +44,7 @@ try {
   // not critical — env may be set by the shell already
 }
 
-import { AgentBazaar, DegradedDiscoveryError, type ServiceProvider } from '@agentbazaar/sdk';
+import { AgentBazaar, DegradedDiscoveryError, type ServiceProvider } from '@agent-bazaar/sdk';
 import { Wallet } from '@coral-xyz/anchor';
 import {
   getAssociatedTokenAddressSync,
@@ -552,7 +552,7 @@ async function main() {
   // Fetch jobs_completed from listing account
   let jobsCompleted = 0;
   try {
-    const { BazaarRegistryIDL } = await import('@agentbazaar/idl');
+    const { BazaarRegistryIDL } = await import('@agent-bazaar/idl');
     const { AnchorProvider, Program } = await import('@coral-xyz/anchor');
     // biome-ignore lint/suspicious/noExplicitAny: noop wallet used for read-only RPC queries; Anchor generics require any
     const noopWallet: any = {

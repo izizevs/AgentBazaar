@@ -41,7 +41,7 @@ Each item must be demonstrated by `qa-test-eng` before moving on to M1.
 ### apps/indexer/ (owner: backend-eng)
 - Helius webhook endpoint (Node + pino)
 - Drizzle schema + drizzle-kit migrations for `service_listings` (PRD §6.2)
-- Event decoder (via `@agentbazaar/idl`)
+- Event decoder (via `@agent-bazaar/idl`)
 - Handler: `ServiceListingCreated/Updated` → upsert into Postgres
 - Integration test against the live Postgres (docker-compose)
 

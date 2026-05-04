@@ -11,8 +11,8 @@
  *   PINATA_JWT=your_jwt npx tsx examples/metadata-upload.ts
  */
 
-import { computeCapabilityHash } from '@agentbazaar/idl';
-import { MetadataUploadError } from '@agentbazaar/sdk';
+import { computeCapabilityHash } from '@agent-bazaar/idl';
+import { MetadataUploadError } from '@agent-bazaar/sdk';
 
 const PINATA_JWT = process.env.PINATA_JWT ?? '';
 if (!PINATA_JWT) {

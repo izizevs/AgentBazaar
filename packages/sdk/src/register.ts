@@ -1,5 +1,5 @@
-import type { BazaarRegistry } from '@agentbazaar/idl';
-import { BazaarRegistryIDL, computeCapabilityHash, MetadataSchema } from '@agentbazaar/idl';
+import type { BazaarRegistry } from '@agent-bazaar/idl';
+import { BazaarRegistryIDL, computeCapabilityHash, MetadataSchema } from '@agent-bazaar/idl';
 import { AnchorProvider, Program } from '@coral-xyz/anchor';
 import { ComputeBudgetProgram, type Connection, PublicKey, Transaction } from '@solana/web3.js';
 import BN from 'bn.js';

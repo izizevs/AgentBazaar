@@ -22,7 +22,7 @@ import {
   DiscoveryAPIError,
   RPCFallbackFailedError,
   ValidationError,
-} from '@agentbazaar/sdk';
+} from '@agent-bazaar/sdk';
 import { Keypair } from '@solana/web3.js';
 
 const rpc = process.env.SOLANA_RPC_URL ?? 'https://api.devnet.solana.com';

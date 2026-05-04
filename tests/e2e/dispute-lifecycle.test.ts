@@ -2,7 +2,7 @@
  * E2E: dispute path — register → hire → dispute → vault refunded to buyer.
  * Hits devnet directly. Guarded by E2E=true env var.
  *
- * Run: E2E=true pnpm --filter @agentbazaar/tests test:e2e
+ * Run: E2E=true pnpm --filter @agent-bazaar/tests test:e2e
  *
  * M1 stub: dispute triggers immediate full refund to buyer (no arbitration).
  * Task #30 / R4 (Task #50).
@@ -11,7 +11,7 @@
 import { readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import { AgentBazaar, EscrowAlreadyResolvedError } from '@agentbazaar/sdk';
+import { AgentBazaar, EscrowAlreadyResolvedError } from '@agent-bazaar/sdk';
 import { Wallet } from '@coral-xyz/anchor';
 import { getAssociatedTokenAddressSync } from '@solana/spl-token';
 import { Connection, Keypair, type PublicKey } from '@solana/web3.js';

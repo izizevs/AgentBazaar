@@ -1,19 +1,19 @@
 {
-  "name": "@agentbazaar/tests",
+  "name": "@agent-bazaar/tests",
   "version": "0.1.0",
   "private": true,
   "description": "E2E, SLA, and load tests for AgentBazaar.",
   "type": "module",
   "scripts": {
     "test": "vitest run",
-    "pretest:e2e": "pnpm --filter @agentbazaar/sdk build",
+    "pretest:e2e": "pnpm --filter @agent-bazaar/sdk build",
     "test:e2e": "E2E=true vitest run e2e/",
     "typecheck": "tsc --noEmit",
     "lint": "biome check fixtures helpers mocks e2e"
   },
   "dependencies": {
-    "@agentbazaar/idl": "workspace:*",
-    "@agentbazaar/sdk": "workspace:*",
+    "@agent-bazaar/idl": "workspace:*",
+    "@agent-bazaar/sdk": "workspace:*",
     "@coral-xyz/anchor": "0.31.1",
     "@solana/spl-token": "^0.4.9",
     "@solana/web3.js": "^1.98.0"

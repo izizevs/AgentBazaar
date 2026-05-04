@@ -18,7 +18,7 @@ import {
   MetadataUploadError,
   TransactionFailedError,
   ValidationError,
-} from '@agentbazaar/sdk';
+} from '@agent-bazaar/sdk';
 import { Keypair } from '@solana/web3.js';
 
 const DEVNET_RPC = 'https://api.devnet.solana.com';

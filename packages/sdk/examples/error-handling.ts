@@ -1,6 +1,6 @@
 /**
  * error-handling.ts — demonstrates catching and inspecting every error class
- * exported by @agentbazaar/sdk.
+ * exported by @agent-bazaar/sdk.
  *
  * No network calls are made; errors are constructed locally to show the
  * instanceof pattern and structured fields available on each class.
@@ -22,7 +22,7 @@ import {
   TransactionFailedError,
   ValidationError,
   WalletNotConnectedError,
-} from '@agentbazaar/sdk';
+} from '@agent-bazaar/sdk';
 
 // ── Helper ────────────────────────────────────────────────────────────────────
 
@@ -74,7 +74,7 @@ function handle(err: unknown) {
     console.log(`IDLMismatchError: ${err.message}`);
     if (err.expected && err.got) {
       console.log(`  Expected IDL version ${err.expected}, got ${err.got}.`);
-      console.log('  Upgrade @agentbazaar/sdk to match the deployed program version.');
+      console.log('  Upgrade @agent-bazaar/sdk to match the deployed program version.');
     }
   } else if (err instanceof NotImplementedError) {
     console.log(`NotImplementedError: ${err.message}`);

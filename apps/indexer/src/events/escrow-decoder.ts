@@ -1,5 +1,5 @@
 import { Buffer } from 'node:buffer';
-import { bazaarEscrowIdl } from '@agentbazaar/idl';
+import { bazaarEscrowIdl } from '@agent-bazaar/idl';
 import type { Idl } from '@coral-xyz/anchor';
 import { BorshEventCoder } from '@coral-xyz/anchor';
 import bs58 from 'bs58';

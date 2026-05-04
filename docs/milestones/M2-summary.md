@@ -179,7 +179,7 @@ Database: Neon `ep-wild-rice-anbjwl1b-pooler.c-6.us-east-1.aws.neon.tech`.
 `tests/e2e/register-discover.test.ts` and `tests/e2e/full-lifecycle.test.ts` were written before PR #95 changed `discover()` to always throw `DegradedDiscoveryError` on API unavailability. Both tests used `discoveryApiUrl: 'http://localhost:9999'` (intentionally unavailable) but expected a direct array return. Fixed: added try/catch around `discover()` calls accepting `DegradedDiscoveryError` and unpacking `err.rpcResults`.
 
 **Issue 3 — dist build gate (test infrastructure):**
-Added `"pretest:e2e": "pnpm --filter @agentbazaar/sdk build"` to `tests/package.json` so E2E runs always execute against a freshly built SDK dist, eliminating stale-bundle false failures.
+Added `"pretest:e2e": "pnpm --filter @agent-bazaar/sdk build"` to `tests/package.json` so E2E runs always execute against a freshly built SDK dist, eliminating stale-bundle false failures.
 
 **RD2 / R7 — EscrowNotExpiredError not thrown (SDK bug):**
 Root cause: pnpm resolves two distinct `@solana/web3.js` module instances (SDK's own `node_modules` vs the test process's `node_modules`). The `instanceof SendTransactionError` guard in `sendWithRetry` evaluated to `false` for errors thrown by the test process's `Connection`, so `mapSimulationError` was never called. The error fell through to the retry loop, was treated as transient (not an SDK error type), and after all retries was wrapped in a plain `TransactionFailedError`. Fixed in `packages/sdk/src/escrow-utils.ts`: added duck-type fallback (`typeof sendErr.transactionMessage === 'string'`) to detect `SendTransactionError` across module boundaries.

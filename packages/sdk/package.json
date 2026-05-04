@@ -1,5 +1,5 @@
 {
-  "name": "@agentbazaar/sdk",
+  "name": "@agent-bazaar/sdk",
   "version": "0.3.0",
   "description": "TypeScript SDK for the AgentBazaar on-chain agent marketplace.",
   "license": "MIT",
@@ -45,7 +45,7 @@
     "lint": "biome check src tests"
   },
   "dependencies": {
-    "@agentbazaar/idl": "workspace:*",
+    "@agent-bazaar/idl": "workspace:*",
     "@coral-xyz/anchor": "0.31.1",
     "@solana/spl-token": "^0.4.9",
     "@solana/web3.js": "^1.95.0",

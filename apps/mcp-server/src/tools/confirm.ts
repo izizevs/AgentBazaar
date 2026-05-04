@@ -1,6 +1,6 @@
 // bazaar_confirm — build an unsigned confirm_delivery transaction.
 // Sign-tx-on-client: MCP server constructs the tx; the LLM client (buyer) signs + broadcasts.
-import { buildConfirmTx } from '@agentbazaar/sdk';
+import { buildConfirmTx } from '@agent-bazaar/sdk';
 import { Connection, PublicKey } from '@solana/web3.js';
 import { z } from 'zod';
 

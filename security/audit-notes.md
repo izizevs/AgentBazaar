@@ -148,7 +148,7 @@ anchor-eng / sdk-eng / backend-eng handoff as M1 kicks off.
 
 ## PR #12 — feature/sdk-idl-codegen — 2026-04-24
 **Verdict:** APPROVED (with one Medium finding — hardening recommended before
-`@agentbazaar/idl` ships to npm; non-blocking for M0 internal use)
+`@agent-bazaar/idl` ships to npm; non-blocking for M0 internal use)
 
 **Scope of review:**
 - `packages/idl/scripts/codegen.mjs` (new, +54) — IDL JSON → TS emitter
@@ -305,7 +305,7 @@ No on-chain scope. No escrow / vault / PDA / admin-key logic touched.
 
 **Recommended fixes (for sdk-eng follow-up, ordered by urgency):**
 
-1. **Before `npm publish` of `@agentbazaar/idl` (M1-era):** add the
+1. **Before `npm publish` of `@agent-bazaar/idl` (M1-era):** add the
    `programName` regex guard in `scripts/codegen.mjs` (M1). Single
    line + a regression test that asserts codegen throws on a crafted
    IDL.
@@ -378,7 +378,7 @@ Diff re-walked:
 anchor-eng's to land; sdk-eng's snapshot test will catch the IDL
 drift when it happens. No action needed on PR #12.
 
-**Release gate:** cleared. `@agentbazaar/idl` is safe to publish to
+**Release gate:** cleared. `@agent-bazaar/idl` is safe to publish to
 npm from a security standpoint (modulo the usual `npm publish`
 hygiene — 2FA, provenance, no leaked `.env`).
 
@@ -412,7 +412,7 @@ admin surface. All eight public methods are stubs that throw
    or internal helpers escape. `package.json` `files: ["dist"]`
    ships only the built artifacts — source tree stays private.
    `publishConfig.access: public` is correct for a published
-   `@agentbazaar/sdk`.
+   `@agent-bazaar/sdk`.
 
 2. ✅ **New deps clean.**
    - `@solana/web3.js` at `^1.95.0` → lockfile resolves to
@@ -477,7 +477,7 @@ admin surface. All eight public methods are stubs that throw
   subclass `instanceof` chain. Good breadth for a skeleton. When
   implementations land, the test plan should grow to cover the
   actual tx-building logic — flag for qa-test-eng in M1.
-- **O4.** The `@agentbazaar/idl` dep is `workspace:*` — correct
+- **O4.** The `@agent-bazaar/idl` dep is `workspace:*` — correct
   for monorepo linking and will be pinned to a concrete version
   at publish time via pnpm. No action.
 - **O5.** `tests/client.test.ts` constructs `new Connection(TEST_RPC)`
@@ -1613,7 +1613,7 @@ internals stays out.
    commit secret values to source. Examples are excluded from the
    tarball anyway.
 2. ✅ **README accuracy.** Install commands map to the published
-   package name (`@agentbazaar/sdk`); peer-dep instruction matches
+   package name (`@agent-bazaar/sdk`); peer-dep instruction matches
    `package.json` peer-deps; quick-start code matches the actual
    exported `AgentBazaar` API and the post-PR-#26 error hierarchy.
 3. ✅ **`publishConfig.access: public`** — present in the tail of
@@ -2087,7 +2087,7 @@ carry through cleanly.
 
 ## PR #38 — feature/qa-test-infra — 2026-04-25 (light audit)
 **Verdict:** APPROVED. No findings; two informational observations.
-Test scaffolding PR (`@agentbazaar/tests` package) — no production
+Test scaffolding PR (`@agent-bazaar/tests` package) — no production
 code, no on-chain mutations beyond test-owned mint, no signed
 flows beyond test keypairs.
 
@@ -4908,7 +4908,7 @@ breaking-change blast radius for `tests/helpers/tx-utils.ts`.
     `EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v`). Currently overridable
     via the `usdcMint` parameter on `hireAgent`, so non-blocking; track
     as M2 follow-up alongside L2.
-  - **L5. No `CHANGELOG.md` for `@agentbazaar/sdk`.** Going `0.1.0 →
+  - **L5. No `CHANGELOG.md` for `@agent-bazaar/sdk`.** Going `0.1.0 →
     0.2.0` with a documented breaking change (the `deriveListingPda`
     signature, `REGISTRY_PROGRAM_ID` removal, `UnknownClusterError`
     throw) deserves a changelog entry. Recommend adding
@@ -5115,7 +5115,7 @@ No race window between validation and TCP connect. ✅
 | Check | Pre-fixup | Post-fixup |
 |---|---|---|
 | H1 IP probe (8 positives + 4 negatives) | 4/12 ❌ | 12/12 ✅ |
-| `pnpm -F @agentbazaar/indexer test` | 10 timeouts in 50 s ❌ | 86 pass / 14 skip in 525 ms ✅ |
+| `pnpm -F @agent-bazaar/indexer test` | 10 timeouts in 50 s ❌ | 86 pass / 14 skip in 525 ms ✅ |
 | TLS SNI / cert validation | ✅ unchanged | ✅ unchanged |
 | DNS pinning race-free | ✅ unchanged | ✅ unchanged |
 
@@ -5273,7 +5273,7 @@ strictly. Trust boundary intact at all times.
   - **L2.** Anchor 0.31's IDL generator embeds the constant address
     into the IDL JSON. Downstream consumers (SDK, dashboard,
     indexer) that build against the devnet IDL will compile-bind to
-    `4zMMC9…`. If the published `@agentbazaar/sdk` ever ships a
+    `4zMMC9…`. If the published `@agent-bazaar/sdk` ever ships a
     devnet IDL but is consumed against a mainnet RPC, every
     `create_escrow` will fail at simulation. Mitigation: at
     `npm publish` time, ship two IDLs (`bazaar_escrow.devnet.json`
@@ -5627,7 +5627,7 @@ normalises *before* the range check. **No bypass found.**
     before the next migration is generated.
 
     **Recommended fix:** either regenerate the snapshot
-    (`pnpm --filter @agentbazaar/indexer db:generate` after applying #5)
+    (`pnpm --filter @agent-bazaar/indexer db:generate` after applying #5)
     or hand-edit `0005_snapshot.json:354` to read
     `"expression": "price_usdc_base_units"` and update the snapshot `id`
     to invalidate stale caches. **Not a merge blocker** — the snapshot
@@ -5975,7 +5975,7 @@ failure modes:
 ### Cross-checks performed
 
 - ✅ `diff` of `serializeListing()` (apps/api/src/routes/listings.ts:34-52) vs `ListingDtoSchema` (packages/sdk/src/discover.ts:42-82) — 15 fields, exact match.
-- ✅ `pnpm -F @agentbazaar/sdk test` — 226 passed / 1 skipped in 871 ms (in audit worktree, fresh install).
+- ✅ `pnpm -F @agent-bazaar/sdk test` — 226 passed / 1 skipped in 871 ms (in audit worktree, fresh install).
 - ✅ `grep -n "passthrough\|strict" packages/sdk/src/discover.ts` — no matches; default `.strip()` confirmed.
 - ✅ `grep -n "AbortSignal\|timeout" packages/sdk/src/discover.ts` — single hardcoded `AbortSignal.timeout(10_000)` at line 135.
 - ✅ `grep -n "https\|http://" packages/sdk/src/{client,discover}.ts` — default URL is `http://localhost:8787`; no scheme validation on caller-supplied URL.

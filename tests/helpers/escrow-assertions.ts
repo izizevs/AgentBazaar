@@ -1,5 +1,5 @@
-import type { BazaarEscrow } from '@agentbazaar/idl';
-import { BazaarEscrowIDL } from '@agentbazaar/idl';
+import type { BazaarEscrow } from '@agent-bazaar/idl';
+import { BazaarEscrowIDL } from '@agent-bazaar/idl';
 import { AnchorProvider, Program } from '@coral-xyz/anchor';
 import type { Connection } from '@solana/web3.js';
 import { PublicKey, type Transaction, type VersionedTransaction } from '@solana/web3.js';

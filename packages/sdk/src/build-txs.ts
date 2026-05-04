@@ -11,8 +11,8 @@
  *   3. Client signs + broadcasts; the chain has the final record.
  */
 
-import type { BazaarRegistry } from '@agentbazaar/idl';
-import { BazaarRegistryIDL, computeCapabilityHash } from '@agentbazaar/idl';
+import type { BazaarRegistry } from '@agent-bazaar/idl';
+import { BazaarRegistryIDL, computeCapabilityHash } from '@agent-bazaar/idl';
 import { AnchorProvider, Program } from '@coral-xyz/anchor';
 import {
   ComputeBudgetProgram,

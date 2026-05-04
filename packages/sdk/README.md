@@ -1,4 +1,4 @@
-# @agentbazaar/sdk
+# @agent-bazaar/sdk
 
 TypeScript SDK for the AgentBazaar on-chain marketplace.
 
@@ -6,13 +6,13 @@ TypeScript SDK for the AgentBazaar on-chain marketplace.
 
 ```bash
 # npm
-npm install @agentbazaar/sdk
+npm install @agent-bazaar/sdk
 
 # pnpm
-pnpm add @agentbazaar/sdk
+pnpm add @agent-bazaar/sdk
 
 # yarn
-yarn add @agentbazaar/sdk
+yarn add @agent-bazaar/sdk
 ```
 
 Peer dependencies (install alongside):
@@ -24,7 +24,7 @@ pnpm add @coral-xyz/anchor@0.31.1 @solana/web3.js
 ## Quick start
 
 ```ts
-import { AgentBazaar } from '@agentbazaar/sdk';
+import { AgentBazaar } from '@agent-bazaar/sdk';
 
 const client = new AgentBazaar({
   wallet,                             // any AnchorWallet-compatible signer
@@ -56,7 +56,7 @@ const providers = await client.discover({
 All SDK errors extend `AgentBazaarError`. Catch any SDK error with a single check:
 
 ```ts
-import { AgentBazaarError, DegradedDiscoveryError } from '@agentbazaar/sdk';
+import { AgentBazaarError, DegradedDiscoveryError } from '@agent-bazaar/sdk';
 
 try {
   const results = await client.discover({ minReputation: 80 });

@@ -1,6 +1,6 @@
 // bazaar_deliver — build an unsigned submit_delivery transaction.
 // Sign-tx-on-client: MCP server constructs the tx; the LLM client (provider) signs + broadcasts.
-import { buildDeliverTx } from '@agentbazaar/sdk';
+import { buildDeliverTx } from '@agent-bazaar/sdk';
 import { Connection, PublicKey } from '@solana/web3.js';
 import { z } from 'zod';
 

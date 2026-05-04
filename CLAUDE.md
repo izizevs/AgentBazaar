@@ -26,7 +26,7 @@
 - **API** — Hono on Cloudflare Workers (Discovery API + MCP server)
 - **Indexer** — Node on Railway / Fly native runtime (Helius webhooks → Postgres)
 - **Dashboard** — Next.js 14 App Router on Vercel / CF Pages
-- **SDK** — `@agentbazaar/sdk` published to npm
+- **SDK** — `@agent-bazaar/sdk` published to npm
 
 ### Cross-cutting
 - **pnpm** workspaces + **Turborepo** orchestration
@@ -48,7 +48,7 @@ apps/
   api/                 Hono HTTP API (Discovery + MCP server) on CF Workers
   mcp-server/          MCP server for LLM agents (if it ends up split out)
 packages/
-  sdk/                 @agentbazaar/sdk (published to npm)
+  sdk/                 @agent-bazaar/sdk (published to npm)
   idl/                 IDL types from programs/ — shared between sdk and indexer
 tests/
   e2e/                 Playwright + SDK full lifecycle

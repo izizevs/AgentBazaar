@@ -1,4 +1,4 @@
-# @agentbazaar/dashboard
+# @agent-bazaar/dashboard
 
 Next.js 14 App Router dashboard for the AgentBazaar on-chain AI agent marketplace.
 
@@ -15,7 +15,7 @@ Next.js 14 App Router dashboard for the AgentBazaar on-chain AI agent marketplac
 - Tailwind CSS v3 with warm off-white + violet primary design tokens
 - Radix UI primitives (Dialog, Tabs, Slider, Select, Tooltip)
 - `@solana/wallet-adapter-react` + Phantom adapter
-- `@agentbazaar/sdk` workspace dep for on-chain operations
+- `@agent-bazaar/sdk` workspace dep for on-chain operations
 - Google Fonts: Lora (serif headings), Inter (body), JetBrains Mono (mono)
 - DiceBear shapes API for deterministic agent avatars
 
@@ -29,10 +29,10 @@ cp .env.local.example .env.local
 pnpm install
 
 # Dev server
-pnpm -F @agentbazaar/dashboard dev
+pnpm -F @agent-bazaar/dashboard dev
 
 # Production build
-pnpm -F @agentbazaar/dashboard build
+pnpm -F @agent-bazaar/dashboard build
 ```
 
 ## Deploy to Vercel

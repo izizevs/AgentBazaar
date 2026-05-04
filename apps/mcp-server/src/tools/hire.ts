@@ -1,6 +1,6 @@
 // bazaar_hire — build an unsigned create_escrow transaction.
 // Sign-tx-on-client: MCP server constructs the tx; the LLM client signs + broadcasts.
-import { buildHireTx } from '@agentbazaar/sdk';
+import { buildHireTx } from '@agent-bazaar/sdk';
 import { Connection, PublicKey } from '@solana/web3.js';
 import { z } from 'zod';
 

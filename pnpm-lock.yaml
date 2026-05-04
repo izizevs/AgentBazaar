@@ -8,10 +8,10 @@ importers:
 
   .:
     dependencies:
-      '@agentbazaar/idl':
+      '@agent-bazaar/idl':
         specifier: workspace:*
         version: link:packages/idl
-      '@agentbazaar/sdk':
+      '@agent-bazaar/sdk':
         specifier: workspace:*
         version: link:packages/sdk
       '@coral-xyz/anchor':
@@ -79,10 +79,10 @@ importers:
 
   apps/dashboard:
     dependencies:
-      '@agentbazaar/idl':
+      '@agent-bazaar/idl':
         specifier: workspace:*
         version: link:../../packages/idl
-      '@agentbazaar/sdk':
+      '@agent-bazaar/sdk':
         specifier: workspace:*
         version: link:../../packages/sdk
       '@coral-xyz/anchor':
@@ -170,7 +170,7 @@ importers:
 
   apps/indexer:
     dependencies:
-      '@agentbazaar/idl':
+      '@agent-bazaar/idl':
         specifier: workspace:*
         version: link:../../packages/idl
       '@coral-xyz/anchor':
@@ -228,7 +228,7 @@ importers:
 
   apps/mcp-server:
     dependencies:
-      '@agentbazaar/sdk':
+      '@agent-bazaar/sdk':
         specifier: workspace:*
         version: link:../../packages/sdk
       '@modelcontextprotocol/sdk':
@@ -278,7 +278,7 @@ importers:
 
   packages/sdk:
     dependencies:
-      '@agentbazaar/idl':
+      '@agent-bazaar/idl':
         specifier: workspace:*
         version: link:../idl
       '@coral-xyz/anchor':
@@ -312,10 +312,10 @@ importers:
 
   tests:
     dependencies:
-      '@agentbazaar/idl':
+      '@agent-bazaar/idl':
         specifier: workspace:*
         version: link:../packages/idl
-      '@agentbazaar/sdk':
+      '@agent-bazaar/sdk':
         specifier: workspace:*
         version: link:../packages/sdk
       '@coral-xyz/anchor':

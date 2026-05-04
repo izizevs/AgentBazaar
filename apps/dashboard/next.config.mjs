@@ -9,7 +9,7 @@ const nextConfig = {
       },
     ],
   },
-  transpilePackages: ['@agentbazaar/sdk', '@agentbazaar/idl'],
+  transpilePackages: ['@agent-bazaar/sdk', '@agent-bazaar/idl'],
   webpack: (config) => {
     // Wallet adapter uses browser APIs — exclude from SSR bundles
     config.resolve.fallback = {

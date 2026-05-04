@@ -2,7 +2,7 @@
  * Placeholder umbrella type for bazaar_sla. The richly-typed version (literal
  * discriminator arrays, named instructions, etc.) is emitted by `anchor build`
  * into `programs/target/types/bazaar_sla.ts` and copied here via
- * `pnpm -F @agentbazaar/idl sync`. Until that toolchain run produces a fresh
+ * `pnpm -F @agent-bazaar/idl sync`. Until that toolchain run produces a fresh
  * artifact, this loose shape lets `tsc` pass while still requiring the JSON to
  * be a valid Anchor IDL at runtime.
  */
