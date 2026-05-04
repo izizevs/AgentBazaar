@@ -22,6 +22,17 @@ const PRICING_MODEL_BYTE: Record<RegisterInput['pricingModel'], number> = {
   subscription: 3,
 };
 
+const PRICING_MODELS = Object.keys(PRICING_MODEL_BYTE) as Array<RegisterInput['pricingModel']>;
+
+function toPricingModelByte(value: unknown): number {
+  if (typeof value !== 'string' || !(value in PRICING_MODEL_BYTE)) {
+    throw new ValidationError(
+      `pricingModel must be one of ${PRICING_MODELS.join(' | ')}, got ${typeof value === 'string' ? `"${value}"` : typeof value}`,
+    );
+  }
+  return PRICING_MODEL_BYTE[value as RegisterInput['pricingModel']];
+}
+
 // micro-lamports per compute unit for successive retry attempts
 const RETRY_PRIORITY_FEES = [0, 100_000, 500_000] as const;
 
@@ -147,7 +158,7 @@ export async function registerService(
   // 8. Prepare instruction arguments
   const satiAgentId = new BN(satiId.toString());
   const priceUsdcBaseUnits = new BN(input.priceUsdc.toString());
-  const pricingModelByte = PRICING_MODEL_BYTE[input.pricingModel];
+  const pricingModelByte = toPricingModelByte(input.pricingModel);
   const slaParams = toAnchorSla(input.sla);
 
   // 9. Build instruction
