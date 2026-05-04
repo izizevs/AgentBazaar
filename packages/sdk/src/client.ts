@@ -142,7 +142,16 @@ export class AgentBazaar {
   }
 
   /**
-   * Confirm job completion as the buyer, releasing USDC to the seller.
+   * Confirm job completion as the buyer, releasing USDC according to SLA terms.
+   *
+   * **Payout note:** the actual seller/buyer split is determined by the on-chain
+   * `compute_severity()` function — comparing `delivered_at - created_at` against
+   * the escrow's `sla_max_latency_ms`. Bands (subject to change in M3, see #27):
+   * - within 110% of SLA  → 100% to seller
+   * - within 150% of SLA  →  80% to seller, 20% buyer refund
+   * - over 150%           →  50% to seller, 50% buyer refund
+   *
+   * `input.score` is **telemetry only** (see `ConfirmInput.score` JSDoc).
    *
    * @throws {EscrowNotFoundError} if escrow does not exist
    * @throws {DeliveryNotSubmittedError} if no delivery has been submitted yet
