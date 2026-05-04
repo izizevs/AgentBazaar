@@ -295,3 +295,32 @@ export async function fetchMetadata(metadataUri: string): Promise<Metadata | nul
 
   return parsed.data;
 }
+
+/**
+ * fetchMetadata with bounded retries — used by event handlers where a transient
+ * failure (Pinata propagation lag, IPFS gateway hiccup, network blip) would
+ * otherwise leave the listing's capability/endpoint columns NULL forever.
+ *
+ * Retries `attempts` times with linear backoff `delayMs` between attempts.
+ * Returns the first successful result, or null if all attempts fail.
+ *
+ * Default schedule: 3 attempts at t=0s, t=5s, t=30s (~35s total worst case).
+ * The values match the typical Pinata public-gateway propagation window.
+ */
+export async function fetchMetadataWithRetry(
+  metadataUri: string,
+  attempts = 3,
+  delaysMs: readonly number[] = [0, 5_000, 30_000],
+): Promise<Metadata | null> {
+  for (let i = 0; i < attempts; i++) {
+    const delay = delaysMs[i] ?? delaysMs[delaysMs.length - 1] ?? 0;
+    if (delay > 0) await new Promise((r) => setTimeout(r, delay));
+    const result = await fetchMetadata(metadataUri);
+    if (result) return result;
+    logger.info(
+      { uri: safeLogUrl(metadataUri), attempt: i + 1, attempts },
+      'metadata fetch attempt failed, retrying',
+    );
+  }
+  return null;
+}

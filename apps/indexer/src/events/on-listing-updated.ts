@@ -2,7 +2,7 @@ import { getSql } from '../db/client.js';
 import { logger } from '../logger.js';
 import { safeLogUrl } from '../util/safe-log-url.js';
 import type { ServiceListingUpdatedData } from './decoder.js';
-import { fetchMetadata } from './fetch-metadata.js';
+import { fetchMetadataWithRetry } from './fetch-metadata.js';
 
 export async function onListingUpdated(
   txSignature: string,
@@ -53,7 +53,7 @@ export async function onListingUpdated(
 
   // Re-fetch IPFS metadata when metadata_uri changed; persist full blob + extracted fields.
   if (newUri) {
-    const metadata = await fetchMetadata(newUri);
+    const metadata = await fetchMetadataWithRetry(newUri);
     if (metadata) {
       await sql`
         UPDATE service_listings
