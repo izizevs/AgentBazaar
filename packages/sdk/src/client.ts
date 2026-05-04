@@ -13,6 +13,11 @@ import { NotImplementedError } from './errors.js';
 import { DEVNET_USDC_MINT } from './escrow-utils.js';
 import { hireAgent } from './hire.js';
 import { registerService } from './register.js';
+import {
+  type VerifyEscrowOptions,
+  type VerifyEscrowResult,
+  verifyEscrow,
+} from './verify-escrow.js';
 import type {
   ConfirmInput,
   DeliverInput,
@@ -173,6 +178,23 @@ export class AgentBazaar {
    */
   async dispute(escrowId: string, input: DisputeInput): Promise<string> {
     return openEscrowDispute(this.connection, this.wallet, escrowId, input, this.usdcMint);
+  }
+
+  /**
+   * Inspect an escrow on-chain and validate listing/seller/state expectations.
+   *
+   * Intended for service providers receiving a buyer request: cheaply confirm
+   * the escrow is real, belongs to the agent's listing, names the agent as
+   * seller, and is in the expected state — BEFORE doing any work.
+   *
+   * Returns a discriminated `{ ok: true, escrow }` or `{ ok: false, reason }`
+   * result so callers can map to HTTP errors without try/catch ceremony.
+   */
+  async verifyEscrow(
+    escrowId: string,
+    options: VerifyEscrowOptions = {},
+  ): Promise<VerifyEscrowResult> {
+    return verifyEscrow(this.connection, this.wallet, escrowId, options);
   }
 
   /**
