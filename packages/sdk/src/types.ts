@@ -108,7 +108,28 @@ export interface Job {
 export interface DeliverInput {
   /** URI pointing to the job result (e.g., IPFS/Arweave). */
   resultUri: string;
-  /** SHA-256 hash of the result payload (32 bytes). */
+  /**
+   * Content commitment to the result payload — exactly 32 bytes.
+   *
+   * **Recommended** (M2 convention): `SHA-256(resultPayload)` where
+   * `resultPayload` is the byte-string that the buyer will retrieve from
+   * `resultUri` (typically the JSON document uploaded to IPFS).
+   *
+   * Use a deterministic serialiser if the result is JSON — see
+   * `docs/protocol/result-hash.md`. The most common pattern is:
+   *
+   * ```ts
+   * const payload = JSON.stringify({ input, output, computedAt, providerPubkey });
+   * const hash = new Uint8Array(await crypto.subtle.digest('SHA-256',
+   *   new TextEncoder().encode(payload)));
+   * ```
+   *
+   * The hash is opaque to the on-chain program — it stores the 32 bytes
+   * verbatim. Buyers MAY re-fetch `resultUri` and recompute the hash to
+   * detect tampering. Future evaluator / dispute flows may require a
+   * specific canonicalisation; until then any 32-byte commitment scheme
+   * is accepted by the program.
+   */
   resultHash: Uint8Array;
 }
 
